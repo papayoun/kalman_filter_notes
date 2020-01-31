@@ -1,0 +1,262 @@
+---
+title: "Le filtre de Kalman"
+author: "Pierre Gloaguen"
+date: "30 janvier 2020"
+output:
+  pdf_document:
+    toc: yes
+    number_sections: yes
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+header-includes: \renewcommand{\contentsname}{}
+---
+
+```{r setup, include=FALSE, message = FALSE}
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Modèle générique en en temps discret
+
+On suppose qu'on observe un processus stochastique $\left\lbrace Y_t \right\rbrace_{t \geq 0}$ à valeurs dans $\mathbb{R}^{d_Y}$ de la manière suivante (on se focalise tout d'abord sur un temps discret):
+
+$$
+\left\lbrace
+\begin{array}{rcl}
+X_0  &=& \mu_0 + B_0 \varepsilon_0\\
+X_{t} &=& \mu_t + A_t X_{t - 1} + B_t \varepsilon_t,~t\geq 1\\
+Y_t &=& C_t X_t + D_t \tilde{\varepsilon}_t
+\end{array}
+\right.
+$$
+
+où 
+
+- $\left\lbrace X_t \right\rbrace_{t \geq 0}$ est un processus stochastique à valeurs dans $\mathbb{R}^{d_X}$ qui n'est pas observé.
+- $\left\lbrace \mu_t\right\rbrace_{t\geq 0}$ est un ensemble de vecteurs de dimension $d_X$,
+- $\left\lbrace \varepsilon_t\right\rbrace_{t\geq 0}$ désigne un ensemble de vecteurs aléatoires indépendants, de loi Gaussienne standard (à composantes indépendantes, et de variance 1) de dimension $d_\varepsilon$. 
+- $\left\lbrace A_t \right\rbrace_{t\geq 0}$ est un ensemble de matrices de dimensions $d_X \times d_X$, décrivant la dynamique (linéaire, donc) du processus caché.
+- $\left\lbrace B_t \right\rbrace_{t\geq 0}$ est un ensemble de matrices de dimensions $d_X \times d_\varepsilon$, décrivant la variance de l'innovation du processus caché.
+- $\left\lbrace C_t \right\rbrace_{t\geq 0}$ est un ensemble de matrices de dimensions $d_Y \times d_X$, décrivant le modèle d'observation.
+- $\left\lbrace \tilde{\varepsilon}_t\right\rbrace_{t\geq 0}$ désigne un ensemble de vecteurs aléatoires indépendants, de loi Gaussienne standard (à composantes indépendantes, et de variance 1) de dimension $d_{\tilde{\varepsilon}}$. 
+- $\left\lbrace D_t \right\rbrace_{t\geq 0}$ est un ensemble de matrices de dimensions $d_Y \times d_{\tilde{\varepsilon}}$, décrivant la variance du modèle d'observation.
+
+# Exemple en écologie
+
+## Modèle de déplacement imparfaitement observé en écologie du mouvement.
+
+On se place dans le cadre où on dispose d'observations de positions d'un animal obtenues grâce à des capteurs GPS à différents temps $t_0 = 0, t_1 = 1,\dots, t_n = n$.
+On note $Y_0, \dots, Y_n$ les positions observées, qui sont donc dans $\mathbb{R}^2$ ($d_Y = 2$). 
+On suppose que le GPS est entâchée d'une erreur aléatoire, distribuée selon une loi normale bivariée, centrée et de variance $\sigma^2$.
+
+Dans ce cas, le processus caché est donnée par la vraie position ainsi que par la vitesse de l'animal.
+On suppose que la dynamique de la vitesse bivariée (notée $V_t = (V_{t, 1}, V_{t, 2})'$ ) est linéaire et Gaussienne, c'est à dire que la vitesse à l'instant $t$ est une variable aléatoire Gaussienne, centrée en une application linéaire de la vitesse à l'instant $t - 1$ (plus un éventuel terme constant). 
+La vraie position à l'instant $t$ (notée $Z_t = (Z_{t, 1}, Z_{t, 2})')$ est elle obtenue par la position à l'instant $t - 1$ plus le déplacement induit par la vitesse $V_{t - 1}$.
+
+Pour résumé, de manière générique, le processus caché $X_t$ est le vecteur:
+$$
+X_t = 
+\begin{pmatrix}
+V_{t, 1}\\
+V_{t, 2}\\
+Z_{t, 1}\\
+Z_{t, 2}
+\end{pmatrix}.
+$$
+
+On suppose que $\mu_t$ et $A_t$ sont de la forme:
+
+$$
+\mu_t = 
+\begin{pmatrix}
+c_1(t) \\
+c_2(t) \\
+0 \\
+0
+\end{pmatrix}
+A_t = 
+\begin{pmatrix}
+\alpha_1(t) & \beta_1(t) & 0 & 0\\
+\beta_2(t) & \alpha_2(t) & 0 & 0 \\
+1 & 0 & 1 & 0\\
+0 & 1 & 0 & 1
+\end{pmatrix},
+$$
+
+où les $c_1(t), c_2(t), \alpha_1(t), \alpha_2(t) \beta_1(t), \beta_2(t)$ sont des fonctions décrivant la dynamique du processus\footnote{Par exemple, si $\left\lbrace V_{t, 1} \right\rbrace_{t\geq 0}$ suit un $AR(1)$, indépendant $\left\lbrace V_{t, 2} \right\rbrace_{t\geq 0}$, de paramètres $\mu$ et $\rho$, alors $c_1(t) = \mu$, $\alpha_1(t) = \rho$ et $\beta_1(t)  = 0$.}. 
+
+Dans ce processus caché, l'aléa provient du seul processus de vitesse, ainsi $d_\varepsilon = 2$ et la matrice $B(t)$ s'écrit:
+
+$$
+B_t = 
+\begin{pmatrix}
+\sigma_{11}(t) & \sigma_{12}(t) & \sigma_{13}(t) & \sigma_{14}(t)\\
+\sigma_{21}(t) & \sigma_{22}(t) & \sigma_{23}(t) & \sigma_{24}(t)\\
+\sigma_{31}(t) & \sigma_{32}(t) & \sigma_{33}(t) & \sigma_{34}(t)\\
+\sigma_{41}(t) & \sigma_{42}(t) & \sigma_{43}(t) & \sigma_{44}(t)
+\end{pmatrix}
+$$
+
+Concernant le processus d'observation, les matrices $C_t$ et $D_t$  sont simplement:
+
+$$
+C_t = \begin{pmatrix}
+0 & 0 & 1 & 0\\
+0 & 0 & 0 & 1
+\end{pmatrix},~
+D_t = \begin{pmatrix}
+\sigma & 0\\
+0 & \sigma
+\end{pmatrix}
+$$
+
+
+## Exemple paramétré
+
+On reprend l'exemple précédent avec les fonctions suivantes\footnote{Le choix des valeurs n'est pas anodin et correspond à un certain paramétrage de deux processus de Ornstein Uhlenbenck indépendants.} pour les matrice $A_t$ et $B_t$:
+
+$$
+\left\lbrace 
+\begin{array}{rl}
+c_1(t)      &= 0\\
+\alpha_1(t) = \alpha_2(t) &= \text{e}^{-1}\\
+c_2(t)      &= (1 - \text{e}^{-1})\\
+\alpha_2(t) &= \text{e}^{-1}\\
+\beta_1(t)  = \beta_2(t)  &= 0\\
+\sigma_{11}(t)  = \sigma_{22}(t)  &= \sqrt{2}\\
+\sigma_{33}(t)  = \sigma_{44}(t)  &= \sqrt{2}\\
+\sigma_{12}(t)  = \sigma_{12}(t)  &= 0
+\end{array}
+\right.
+$$
+
+On prend de plus, pour le bruit d'observation, $\sigma = 0.1$.
+
+```{r parameters_list}
+par_simu <- list(A = matrix(c(1          , 0      , 0      , 0, 0,
+                              0          , exp(-1), 0      , 0, 0,
+                              1 - exp(-1), 0      , exp(-1), 0, 0,
+                              0          , 1      , 0      , 1, 0,
+                              0          , 0      , 1      , 0, 1),
+                            nrow = 5, ncol = 5, byrow = T),
+                 B = matrix(c(0, 0,
+                              sqrt(2), 0,
+                              0, sqrt(2),
+                              0, 0,
+                              0, 0),
+                            nrow = 5, ncol = 2, byrow = T),
+                 C = matrix(c(0, 0, 0, 1, 0,
+                              0, 0, 0, 0, 1),
+                            nrow = 2, ncol = 5, byrow = T),
+                 D = matrix(c(5, 0,
+                              0, 5),
+                            nrow = 2, ncol = 2, byrow = T),
+                 mu0 = c(1, 0, 0, 0, 0))
+```
+
+```{r simulation_processus}
+rmlg <- function(n, parametre){
+  n <- as.integer(n)
+  if(n < 1){
+    stop("n should be an integer at least equal to 1")
+  }
+  x <- matrix(NA, nrow = 5, ncol = n + 1)
+  y <- matrix(NA, nrow = 2, ncol = n + 1)
+  x[, 1] <- parametre$mu0 + parametre$B %*% rnorm(2) # Etat initial
+  y[, 1] <- parametre$C %*% x[, 1] + parametre$D %*% rnorm(2)
+  for(k in 1:n){
+    x[, k + 1] <- parametre$A %*% x[, k] + parametre$B %*% rnorm(2)
+    y[, k + 1] <- parametre$C %*% x[, k + 1] + parametre$D %*% rnorm(2)
+  }
+  tibble(t = 0:n, 
+         y1 = y[1, ], y2 = y[2, ], 
+         v1 = x[2, ], v2 = x[3, ],
+         z1 = x[4, ], z2 = x[5, ])
+}
+```
+
+
+```{r premiere_simu, echo = -1}
+set.seed(333)
+simulation <- rmlg(n = 500, parametre = par_simu)
+```
+
+```{r representation}
+simulation %>% 
+  ggplot() +
+  geom_path(aes(x = y1, y = y2, color = t)) + 
+  geom_point(aes(x = y1, y = y2, color = t)) +
+  geom_path(aes(x = z1, y = z2), color = "red") +
+  scale_color_gradient(low = "yellow", high = "blue") +
+  labs(x = expression(Y[1]),
+       y = expression(Y[2]),
+       color = "Temps")
+```
+
+## Objectif du filtre de Kalman {#objectif}
+
+Le but du filtre de Kalman est, à partir des observations (les points sur la figure précédente) et du modèle posé, de retrouver les états cachés (la ligne rouge sur la figure précédente).
+Pour cela, notre objectif est de connaître *la loi* des états cachés **sachant les observations**, à savoir:
+la loi de $X_t \vert Y_{0:n}$.
+
+# Filtrage et lissage de Kalman
+
+## Remarques de notations
+
+Dans la suite, on supposera que toutes les variables aléatoires considérées admettent une densité par rapport à la mesure de Lebesgue.
+
+De manière abusive, la densité d'une variable aléatoire sera toujours notée comme une fonction $p()$.
+Cette notation est surchargée, au sens où la référence à la variable aléatoire est contenue dans ses arguments.
+
+Ainsi, $p(y_k)$ consiste en la densité de la variable aléatoire $Y_k$, évaluée en $y_k \in \mathbb{R}^{d_Y}$.
+De même $p(x_k \vert y_k)$ est la densité de la variable aléatoire $X_k\vert Y_k = y_k$, évaluée en $x_k \in \mathbb{R}^{d_X}$.
+
+De même, quand l'intervalle d'intégration n'est pas précisé, il s'agit alors d'une intégration sur tout le support de la loi.
+
+## Détermination des quantités nécessaires
+
+Notre objectif est de connaître la loi de $X_k \vert \left\lbrace Y_{0:n} = y_{0:n} \right\rbrace$.
+Cette variable aléatoire admet la densité $p(x_k \vert y_{0:n})$.
+Par conditionnement et loi des probabilités totales, on a, pour $0\leq k \leq n - 1$:
+
+\begin{align*}
+p(x_k \vert y_{0:n}) &= \int p(x_k, x_{k + 1} \vert y_{0:n}) \text{d} x_{k + 1} & \text{Probabilités totales}\\
+&= \int p(x_{k} \vert x_{k +1},  y_{0:n}) p(x_{k + 1} \vert y_{0:n}) \text{d} x_{k + 1} & \text{Conditionnement}\\
+&= \int p(x_{k} \vert x_{k +1},  y_{0:k}) p(x_{k + 1} \vert y_{0:n}) \text{d} x_{k + 1} & \text{Propriétés d'indépendance conditionnelle du modèle}\\
+&\propto \int p(x_{k}, x_{k +1}\vert  y_{0:k}) p(x_{k + 1} \vert y_{0:n}) \text{d} x_{k + 1} & \text{La constante ne dépend pas de $x_k$}\\
+&\propto \int p(x_{k + 1}\vert x_{k})p(x_k \vert  y_{0:k}) p(x_{k + 1} \vert y_{0:n}) \text{d} x_{k + 1} & \text{Propriétés du modèle}
+\end{align*}
+
+La propriété remarquable du modèle générique proposé ici est que le résultat de cet intégrale est calculable explicitement.
+La loi résultante est celle d'une loi Gaussienne dont la moyenne et la matrice de variance covariance sont explicites.
+
+## Propriétés de conjugaison de la loi normale multivariée
+
+Soient deux variables aléatoires $U$ et $V$ telles que 
+$$U \sim \mathcal{N}(m_U, \Sigma_U),~V\vert U = u \sim \mathcal{N}(Au + b,\Sigma_{V\vert U})$$
+alors,
+\begin{align}
+U \vert \left\lbrace V = v \right\rbrace &\sim \mathcal{N}\left(\Sigma_{U\vert V}\left(A'\Sigma_V^{-1}(v - b) + \Sigma_U^{-1}m_U \right), \Sigma_{U\vert V}\right) \label{eq:loi:U:cond:V}
+\intertext{où}
+\Sigma_{U\vert V} &= \left(\Sigma_{U}^{-1} + A'\Sigma_{V\vert U}^{-1}A\right)^{-1} \nonumber \\
+V &\sim \mathcal{N}\left(A m_U + b,  \Sigma_{V\vert U} + A \Sigma_U A'\right) \label{eq:loi:V}
+\end{align}
+
+On remarquera que les équations \eqref{eq:loi:U:cond:V} et \eqref{eq:loi:V} correspondent aux densités:
+\begin{align}
+p(u\vert v) \propto p(u)p(v \vert u) \label{eq:dens:U:cond:V}\\
+p(v) = \int p(v\vert u) p(u) \text{d}u \label{eq:dens:V}
+\end{align}
+
+## Loi de filtrage
+
+Comme quantité essentielle apparaissant dans l'équation de lissage vue plus haut est la quantité $p(x_k \vert y_{0:k}), (0\leq k \leq n)$.
+Les deux propriétés précédentes nous montrent que cette densité est celle d'une loi Gaussienne:
+En effet, d'après \eqref{eq:loi:U:cond:V}:
+$$X_0 \vert Y_0 \sim \mathcal{N}()$$
+
+En effet, dans la dernière ligne du développement précédent, on peut remarquer que $p(x_{k + 1}\vert x_{k})$ est la densité d'une loi normale, d'après les équations du modèle.
+Supposons que 
+
