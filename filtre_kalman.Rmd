@@ -15,7 +15,8 @@ header-includes: \renewcommand{\contentsname}{}
 
 ```{r setup, include=FALSE, message = FALSE}
 library(tidyverse)
-knitr::opts_chunk$set(echo = TRUE)
+library(mvtnorm)
+knitr::opts_chunk$set(echo = F)
 ```
 
 # Modèle générique en en temps discret
@@ -135,52 +136,67 @@ $$
 On prend de plus, pour le bruit d'observation, $\sigma = 0.1$.
 
 ```{r parameters_list}
-par_simu <- list(A = matrix(c(1          , 0      , 0      , 0, 0,
-                              0          , exp(-1), 0      , 0, 0,
-                              1 - exp(-1), 0      , exp(-1), 0, 0,
-                              0          , 1      , 0      , 1, 0,
-                              0          , 0      , 1      , 0, 1),
-                            nrow = 5, ncol = 5, byrow = T),
-                 B = matrix(c(0, 0,
-                              sqrt(2), 0,
-                              0, sqrt(2),
-                              0, 0,
-                              0, 0),
-                            nrow = 5, ncol = 2, byrow = T),
-                 C = matrix(c(0, 0, 0, 1, 0,
-                              0, 0, 0, 0, 1),
-                            nrow = 2, ncol = 5, byrow = T),
-                 D = matrix(c(5, 0,
-                              0, 5),
-                            nrow = 2, ncol = 2, byrow = T),
-                 mu0 = c(1, 0, 0, 0, 0))
+get_partial_iou_parameters <- function(rho, mu, sigma, sigma_obs, dt = 0.01){
+  # Recurrent terms
+  e_rt <- exp(-rho * dt)
+  e_rt_sq <- e_rt^2
+  recall  <- 1 - e_rt
+  sig2 <- sigma^2
+  var_asympt <- 0.5 * sig2 / rho
+  var_v <- var_asympt * (1 - e_rt_sq)
+  cov_v_z <- var_asympt * (1 - e_rt)^2 / rho
+  var_z <- var_asympt / rho * (2 * dt + (-e_rt_sq + 4 * e_rt - 3) / rho)
+  m0 <- c(mu, 0, 0)
+  m <- c(recall * mu,  (dt - recall / rho)* mu)
+  A <- matrix(c(e_rt * 
+                  c(1, 0, 0, 0,
+                    0, 1, 0, 0),
+                recall / rho, 0         , 1, 0,
+                0           , recall/rho, 0, 1),
+              nrow = 4, ncol = 4, byrow = T)
+  B <- matrix(c(var_v  , 0      , cov_v_z, 0      ,
+                0      , var_v  , 0      , cov_v_z,
+                cov_v_z, 0      , var_z  , 0      ,
+                0      , cov_v_z, 0      , var_z),
+              nrow = 4, ncol = 4, byrow = T)
+  C = matrix(c(0, 0, 1, 0,
+               0, 0, 0, 1),
+             nrow = 2, ncol = 4, byrow = T)
+  D = sigma_obs * diag(1, 2)
+  list(dt = dt, m0 = m0, m = m, A = A, B = B, C = C, D = D)
+}
 ```
 
 ```{r simulation_processus}
-rmlg <- function(n, parametre){
-  n <- as.integer(n)
+rpiou <- function(n, parametre){
+  n <- ceiling(n) # On s'assure que ce soit un entier
   if(n < 1){
     stop("n should be an integer at least equal to 1")
   }
-  x <- matrix(NA, nrow = 5, ncol = n + 1)
-  y <- matrix(NA, nrow = 2, ncol = n + 1)
-  x[, 1] <- parametre$mu0 + parametre$B %*% rnorm(2) # Etat initial
-  y[, 1] <- parametre$C %*% x[, 1] + parametre$D %*% rnorm(2)
+  dim_x <- 4
+  dim_y <- 2
+  x <- matrix(NA, nrow = dim_x, ncol = n + 1)
+  y <- matrix(NA, nrow = dim_y, ncol = n + 1)
+  x[, 1] <- parametre$m0 + rmvnorm(1, sigma = parametre$B) # Etat initial
+  y[, 1] <- parametre$C %*% x[, 1] + t(rmvnorm(1, sigma = parametre$D))
   for(k in 1:n){
-    x[, k + 1] <- parametre$A %*% x[, k] + parametre$B %*% rnorm(2)
-    y[, k + 1] <- parametre$C %*% x[, k + 1] + parametre$D %*% rnorm(2)
+    x[, k + 1] <- parametre$m + parametre$A %*% x[, k] + t(rmvnorm(1, sigma = parametre$B))
+    y[, k + 1] <- parametre$C %*% x[, k + 1] + t(rmvnorm(1, sigma = parametre$D))
   }
-  tibble(t = 0:n, 
+tibble(t = seq(0, by = parametre$dt, length.out = n + 1), 
          y1 = y[1, ], y2 = y[2, ], 
-         v1 = x[2, ], v2 = x[3, ],
-         z1 = x[4, ], z2 = x[5, ])
+         v1 = x[1, ], v2 = x[2, ],
+         z1 = x[3, ], z2 = x[4, ])
 }
 ```
 
 
 ```{r premiere_simu, echo = -1}
 set.seed(333)
-simulation <- rmlg(n = 500, parametre = par_simu)
+par_simu <- get_partial_iou_parameters(rho = 0.1, mu = c(0, 0), 
+                                       sigma = sqrt(2), sigma_obs = 1,
+                                       dt = 1)
+simulation <- rpiou(n = 2000, parametre = par_simu)
 ```
 
 ```{r representation}
@@ -254,9 +270,42 @@ p(v) = \int p(v\vert u) p(u) \text{d}u \label{eq:dens:V}
 
 Comme quantité essentielle apparaissant dans l'équation de lissage vue plus haut est la quantité $p(x_k \vert y_{0:k}), (0\leq k \leq n)$.
 Les deux propriétés précédentes nous montrent que cette densité est celle d'une loi Gaussienne:
-En effet, d'après \eqref{eq:loi:U:cond:V}:
-$$X_0 \vert Y_0 \sim \mathcal{N}()$$
+
+Pour le montrer, raisonnons par récurrence:
+
+**Cas $k = 0$**
+
+D'après \eqref{eq:loi:U:cond:V}:
+$$X_0 \vert \left\lbrace Y_0 = y_0\right\rbrace \sim \mathcal{N}(m_{0\vert 0}, \Sigma_{0\vert 0})$$
+où $m_{0\vert 0}$ et $\Sigma_{0 \vert 0}$ désignent la moyenne et la variance de la loi, donnée par l'équation \eqref{eq:loi:U:cond:V}.
+
+**Cas k > 0** Supposons que la proposition est vraie pour $k-1$.
+On remarque que:
+\begin{align*}
+p(x_k\vert y_{0:k}) &= \int p(x_k, x_{k - 1}\vert y_{0:k})\text{d}x_{k - 1}\\
+&\propto \int p(y_{0:k}, x_k, x_{k - 1})\text{d}x_{k - 1}\\
+&\propto \int p(y_{k}\vert x_k, x_{k - 1}, y_{0:k-1})p(x_{k}\vert x_{k - 1}, y_{0:k-1})p(x_{k - 1}\vert y_{0:k-1})\text{d}x_{k - 1}\\
+&\propto \int p(y_{k}\vert x_k)p(x_{k}\vert x_{k - 1})p(x_{k - 1}\vert y_{0:k-1})\text{d}x_{k - 1}
+\end{align*}
 
 En effet, dans la dernière ligne du développement précédent, on peut remarquer que $p(x_{k + 1}\vert x_{k})$ est la densité d'une loi normale, d'après les équations du modèle.
 Supposons que 
 
+
+# Annexe: Processus de Ornstein Uhlenbeck
+
+Soit $\left\lbrace V_t \right \rbrace_{t \geq 0}$ un processus stochastique à valeurs dans $\mathbb{R}$ solution de l'équation différentielle stochastique:
+
+$$\text{d}V_t = -\rho\left(X_t - \mu \right) + \sigma \text{d}W_t,~X_0 \sim \chi_0$$
+
+On définit alors $\left\lbrace V_t \right \rbrace_{t \geq 0}$ de la manière suivante:
+$$Z_t = Z_0 + \int_0^t V_s\text{d}s$$
+
+On a alors les propriétés suivantes:
+\begin{align}
+V_{t + \Delta}\vert \left\lbrace V_t = v_t \right\rbrace &\sim \mathcal{N}\left(\text{e}^{-\rho\Delta}v_t + (1 - \text{e}^{-\rho\Delta})\mu , \frac{\sigma^2}{2\rho}(1 - \text{e}^{-2\rho\Delta}) \right)\\
+Z_{t + \Delta} \vert \left\lbrace V_t = v_, Z_t = z_t\right \rbrace &\sim \mathcal{N}\left(x_0 + \mu t +  \frac{1 - \text{e}^{-\rho t}}{\rho}(v_0 - \mu), 
+\frac{\sigma^2}{\rho^2}\left(t + \frac{1}{\rho}\left(- \frac{\text{e}^{-2\rho\Delta}}{2} + 2\text{e}^{-\rho\Delta} - \frac{3}{2} \right)\right) \right)
+\intertext{De plus, on a }
+\mathbb{C}ov[V_{t + \Delta}, Z_{t + \Delta}\vert \left\lbrace V_t = v_, Z_t = z_t\right] &= \frac{\sigma^2}{2\rho^2}\left(1 -  \text{e}^{-2\rho\Delta} \right)^2
+\end{align}
