@@ -254,10 +254,29 @@ Soient deux variables aléatoires $U$ et $V$ telles que
 $$U \sim \mathcal{N}(m_U, \Sigma_U),~V\vert U = u \sim \mathcal{N}(Au + b,\Sigma_{V\vert U})$$
 alors,
 \begin{align}
-U \vert \left\lbrace V = v \right\rbrace &\sim \mathcal{N}\left(\Sigma_{U\vert V}\left(A'\Sigma_V^{-1}(v - b) + \Sigma_U^{-1}m_U \right), \Sigma_{U\vert V}\right) \label{eq:loi:U:cond:V}
-\intertext{où}
-\Sigma_{U\vert V} &= \left(\Sigma_{U}^{-1} + A'\Sigma_{V\vert U}^{-1}A\right)^{-1} \nonumber \\
+U \vert \left\lbrace V = v \right\rbrace &\sim \mathcal{N}\left(\Sigma_{U\vert V}\left(A'\Sigma_{V\vert U}^{-1}(v - b) + \Sigma_U^{-1}m_U \right), \Sigma_{U\vert V}\right) \label{eq:loi:U:cond:V},
+\end{align}
+où:
+\begin{align}
+\Sigma_{U\vert V} &= \left(\Sigma_{U}^{-1} + A'\Sigma_{V\vert U}^{-1}A\right)^{-1} \label{eq:var:U:cond:V} \\
 V &\sim \mathcal{N}\left(A m_U + b,  \Sigma_{V\vert U} + A \Sigma_U A'\right) \label{eq:loi:V}
+\end{align}
+
+En utilisant l'équation (C.7) du livre de Bishop, on peut réécrire la covariance comme
+$$\Sigma_{U\vert V} = (I_{d_U} - KA)\Sigma_U$$
+où $K$ est une matrice $d_U \times d_V$: 
+$$K = \Sigma_UA^{'}(A\Sigma_UA^{'}+\Sigma_{V\vert U})^{-1}$$
+Ensuite, en remarquant
+\footnote{En effet, ceci est équivalent à:
+$$\Sigma_U A\Sigma_{V\vert U}^{-1} = K(Id_V + A\Sigma_UA^{'}\Sigma_{V\vert U}^{-1}).$$
+Cette dernière égalité en factorisant par $\Sigma_{V\vert U}^{-1})$ à droite et en utilisant la définition de $K$.} 
+que:
+$$
+K = (I_{d_U} - KA)\Sigma_UA^{'}\Sigma_{V\vert U}^{-1}
+$$
+on peut réécrire \eqref{eq:loi:U:cond:V}
+\begin{align}
+U \vert \left\lbrace V = v \right\rbrace &\sim \mathcal{N}\left(m_U + K(v - (Am_U + b)), (I_{d_U} - K A)\Sigma_U \right) \label{eq:loi:U:cond:V:alter},
 \end{align}
 
 On remarquera que les équations \eqref{eq:loi:U:cond:V} et \eqref{eq:loi:V} correspondent aux densités:
@@ -265,6 +284,7 @@ On remarquera que les équations \eqref{eq:loi:U:cond:V} et \eqref{eq:loi:V} cor
 p(u\vert v) \propto p(u)p(v \vert u) \label{eq:dens:U:cond:V}\\
 p(v) = \int p(v\vert u) p(u) \text{d}u \label{eq:dens:V}
 \end{align}
+
 
 ## Loi de filtrage
 
@@ -285,11 +305,100 @@ On remarque que:
 p(x_k\vert y_{0:k}) &= \int p(x_k, x_{k - 1}\vert y_{0:k})\text{d}x_{k - 1}\\
 &\propto \int p(y_{0:k}, x_k, x_{k - 1})\text{d}x_{k - 1}\\
 &\propto \int p(y_{k}\vert x_k, x_{k - 1}, y_{0:k-1})p(x_{k}\vert x_{k - 1}, y_{0:k-1})p(x_{k - 1}\vert y_{0:k-1})\text{d}x_{k - 1}\\
-&\propto \int p(y_{k}\vert x_k)p(x_{k}\vert x_{k - 1})p(x_{k - 1}\vert y_{0:k-1})\text{d}x_{k - 1}
+&\propto \int p(y_{k}\vert x_k)p(x_{k}\vert x_{k - 1})p(x_{k - 1}\vert y_{0:k-1})\text{d}x_{k - 1}\\
+&\propto p(y_{k}\vert x_k) \int p(x_{k}\vert x_{k - 1})p(x_{k - 1}\vert y_{0:k-1})\text{d}x_{k - 1}
 \end{align*}
 
-En effet, dans la dernière ligne du développement précédent, on peut remarquer que $p(x_{k + 1}\vert x_{k})$ est la densité d'une loi normale, d'après les équations du modèle.
-Supposons que 
+On peut ici identifier les différents termes à ceux de la proposition précédente.
+L'identification est la suivante:
+\begin{align*}
+U &= \left\lbrace X_{k-1} \vert Y_{0:k-1}\right\rbrace\\
+V &= \left\lbrace X_{k} \vert Y_{0:k-1}\right\rbrace\\
+m_U &= m_{k - 1\vert k - 1}\\
+\Sigma_U &= \Sigma_{k - 1\vert k - 1}\\
+m_{V\vert \left\lbrace U = u \right\rbrace} &= \mu_k + A_{k}u\\
+\Sigma_{V\vert \left\lbrace U = u \right\rbrace} &= B_kB_k'
+\end{align*}
+Donc le résultat de l'intégrale est la densité d'une loi 
+$$
+\mathcal{N}\left(A_{k}
+m_{k - 1\vert k - 1} + \mu_k,
+\underbrace{B_kB_k' + A_k \Sigma_{k - 1\vert k - 1} A_k'}_{\Gamma_k}
+\right)
+$$
+Ensuite, la deuxième identification peut se faire 
+\begin{align*}
+U &= \left\lbrace X_{k} \vert Y_{0:k-1}\right\rbrace\\
+V &= \left\lbrace Y_{k} \vert Y_{0:k-1}\right\rbrace\\
+m_U &= A_km_{k - 1\vert k - 1} + \mu_k\\
+\Sigma_U &= B_kB_k' + A_k \Sigma_{k - 1\vert k - 1} A_k'\\
+m_{V\vert \left\lbrace U = u \right\rbrace} &= C_{k}u\\
+\Sigma_{V\vert \left\lbrace U = u \right\rbrace} &= D_kD_k'
+\end{align*}
+
+L'équation \label{eq:loi:U:cond:V:alter} donne donc
+$$
+\mathcal{N}
+\left(
+A_km_{k - 1\vert k - 1} + \mu_k + K_k(y_k - C_k(A_km_{k - 1\vert k - 1} + \mu_k)),
+(I-K_kC_k)\Gamma_k
+\right)
+$$
+où $K_k$ est le gain de Kalman
+$$
+K_k = \Gamma_k C_k^{'} (D_kD_k^{'}+ C_k\Gamma_kC_k^{'})^{-1}
+$$
+
+Ainsi, pour tout $k$, la loi de $X_k\vert Y_{0:k}$ est Gaussienne, et ses moments se calculent récursivement, dans une passe avant.
+
+En particulier, on obtient la loi de $X_n\vert Y_{0:n}$ qui est une loi Gaussienne de moments connus.
+
+## Loi de lissage
+
+Si on en revient à la loi de lissage, pour $k = n$,
+on a une loi normale de moyenne $m_{n \vert n}$ et de variance $\Sigma_{n\vert n}$.
+Pour $0\leq k \leq n - 1$, on a:
+
+\begin{align*}
+p(x_k \vert y_{0:n}) &\propto  \int p(x_{k + 1}\vert x_{k}) p(x_k \vert  y_{0:k}) p(x_{k + 1} \vert y_{0:n}) \text{d} x_{k + 1}
+\end{align*}
+
+Dans l'intégrale, le premier produit peut être identifié comme la loi de $U\vert V$ avec
+L'identification est la suivante:
+\begin{align*}
+U &= \left\lbrace X_{k} \vert Y_{0:k}\right\rbrace\\
+V &= \left\lbrace X_{k + 1} \vert Y_{0:k}\right\rbrace\\
+m_U &= m_{k\vert k}\\
+\Sigma_U &= \Sigma_{k\vert k}\\
+m_{V\vert \left\lbrace U = u \right\rbrace} &= \mu_{k + 1} + A_{k + 1}u\\
+\Sigma_{V\vert \left\lbrace U = u \right\rbrace} &= B_{k+1}B_{k +1}^{'}
+\end{align*}
+
+Ainsi, on a:
+$$
+X_k \vert \left\lbrace X_{k + 1} = x_{k+1}, Y_{0:k}\right\rbrace 
+\sim
+\mathcal{N}
+\left(
+\tilde{K}_{k+1}x_{k + 1} + m_{k\vert k}   - \tilde{K}_{k+1}(A_{k + 1} m_{k\vert k} + \mu_{k+1})),
+(I - \tilde{K}_{k+1} A_{k + 1})\Sigma_{k\vert k}
+\right)
+$$
+
+où:
+$$\tilde{K}_{k+1} = \Sigma_{k\vert k}A_{k+1}^{'}(A_{k+1}\Sigma_{k\vert k}A_{k+1}^{'} + B_{k + 1}B_{k + 1}^{'} )$$
+
+Ainsi, par conjugaison, l'intégrale du produit résultant donne:
+$$
+X_{k} \vert \left\lbrace Y_{0:n}\right\rbrace 
+\sim
+\mathcal{N}
+\left(
+m_{k\vert k}   - \tilde{K}_{k+1}(m_{k+1\vert n} + A_{k + 1} m_{k\vert k} + \mu_{k+1})),
+(I - \tilde{K}_{k+1} A_{k + 1})\Sigma_{k\vert k} + \tilde{K}_{k+1}\Sigma_{k + 1\vert n}\tilde{K}_{k+1}^{'}
+\right)
+$$
+
 
 
 # Annexe: Processus de Ornstein Uhlenbeck
@@ -305,7 +414,9 @@ On a alors les propriétés suivantes:
 \begin{align}
 V_{t + \Delta}\vert \left\lbrace V_t = v_t \right\rbrace &\sim \mathcal{N}\left(\text{e}^{-\rho\Delta}v_t + (1 - \text{e}^{-\rho\Delta})\mu , \frac{\sigma^2}{2\rho}(1 - \text{e}^{-2\rho\Delta}) \right)\\
 Z_{t + \Delta} \vert \left\lbrace V_t = v_, Z_t = z_t\right \rbrace &\sim \mathcal{N}\left(x_0 + \mu t +  \frac{1 - \text{e}^{-\rho t}}{\rho}(v_0 - \mu), 
-\frac{\sigma^2}{\rho^2}\left(t + \frac{1}{\rho}\left(- \frac{\text{e}^{-2\rho\Delta}}{2} + 2\text{e}^{-\rho\Delta} - \frac{3}{2} \right)\right) \right)
-\intertext{De plus, on a }
+\frac{\sigma^2}{\rho^2}\left(t + \frac{1}{\rho}\left(- \frac{\text{e}^{-2\rho\Delta}}{2} + 2\text{e}^{-\rho\Delta} - \frac{3}{2} \right)\right) \right).
+\end{align}
+De plus, on a:
+\begin{align}
 \mathbb{C}ov[V_{t + \Delta}, Z_{t + \Delta}\vert \left\lbrace V_t = v_, Z_t = z_t\right] &= \frac{\sigma^2}{2\rho^2}\left(1 -  \text{e}^{-2\rho\Delta} \right)^2
 \end{align}
