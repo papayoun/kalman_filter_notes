@@ -14,11 +14,7 @@ IOU <- R6Class(classname = "IOU",
                                        obs_var_,
                                        m0_ = NULL,
                                        var0_ = NULL) {
-                   private$validate(rho_, mu_, sigma_, obs_var_)
-                   private$rho <- rho_
-                   private$mu <- mu_
-                   private$sigma <- sigma_
-                   private$obs_var <- obs_var_
+                   private$check_and_set_params(rho_, mu_, sigma_, obs_var_)
                    private$dimension <- length(mu)
                    if(is.null(m0_)){
                      private$m0 <- rep(0, private$dimension)
@@ -44,8 +40,8 @@ IOU <- R6Class(classname = "IOU",
                  }, # End print method
                  simulate = function(times_ = NULL, n = NULL){
                    private$check_and_set_times(times_, n)
-                   n <- length(self$times) - 1
-                   private$compute_model_matrices()
+                   n_segments <- length(self$times) - 1
+                   private$compute_model_matrices(n_segments)
                    invisible(self)
                  }, # End simulate method
                  get_model_matrices = function(){
@@ -60,10 +56,15 @@ IOU <- R6Class(classname = "IOU",
                private = list(
                  # Attributes --------------------------------------------------
                  dimension = NULL,
+                 # Raw parameters
                  rho = NULL,
-                 rho_inv = NULL,
                  mu = NULL,
                  sigma = NULL,
+                 rho_inv = NULL,
+                 m0 = NULL,
+                 var0 = NULL,
+                 obs_var = NULL,
+                 # Usefull transformations
                  sigma_square = NULL,
                  sigma_square_vec = NULL,
                  kron_sum_rho = NULL,
@@ -87,7 +88,7 @@ IOU <- R6Class(classname = "IOU",
                      kronecker(Id, private$rho)
                    private$kron_sum_rho_inv <- solve(private$kron_sum_rho)
                  },
-                 compute_model_matrices = function(n){
+                 compute_model_matrices = function(n_segments_){
                    private$rho_inv = solve(private$rho)
                    I_dim = diag(1, private$dimension)
                    I_2dim = diag(1, 2 * private$dimension)
@@ -159,27 +160,27 @@ IOU <- R6Class(classname = "IOU",
                      )
                    }
                    time_lags <- diff(self$times)
-                   if(regular_time_stamp){
+                   if(private$regular_time_stamp){
                      dt <- time_lags[1]
                      terms <- compute_all_hidden_terms(dt)
-                     private$hidden_dyn_intercepts <- replicate(n, 
+                     private$hidden_dyn_intercepts <- replicate(n_segments_, 
                                                                 terms[["cst"]],
                                                                 simplify = F)
-                     private$hidden_dyn_matrices <- replicate(n, 
+                     private$hidden_dyn_matrices <- replicate(n_segments_, 
                                                       terms[["dyn"]],
                                                       simplify = F)
-                     private$hidden_cov_matrices <- replicate(n, 
+                     private$hidden_cov_matrices <- replicate(n_segments_, 
                                                       terms[["cov"]],
                                                       simplify = F)
                    }
                    else{
                      private$hidden_dyn_intercepts <- rep(list(rep(NA, 
                                                                    private$dimension),
-                                                               n))
+                                                               n_segments_))
                      private$hidden_dyn_intercepts <- 
                        private$hidden_dyn_intercepts <- 
-                        rep(list(matrix(NA, private$dimension, private$dimension)), n)
-                     for(i in 1:n){
+                        rep(list(matrix(NA, private$dimension, private$dimension)), n_segments_)
+                     for(i in 1:n_segments_){
                        dt <- time_lags[i]
                        terms <- compute_all_hidden_terms(dt)
                        private$hidden_dyn_intercepts[[i]] <- terms[["cst"]]
@@ -188,10 +189,10 @@ IOU <- R6Class(classname = "IOU",
                      }
                    }
                    obs_dyn_matrix <- cbind(diag(0, 2), diag(1, 2))
-                   private$obs_dyn_matrices <- replicate(n,
+                   private$obs_dyn_matrices <- replicate(n_segments_,
                                                          obs_dyn_matrix,
                                                          simplify = F)
-                   private$obs_cov_matrices <- replicate(n,
+                   private$obs_cov_matrices <- replicate(n_segments_,
                                                          private$obs_var,
                                                          simplify = F)
                    
@@ -310,7 +311,7 @@ IOU <- R6Class(classname = "IOU",
                    }
                    self$times <- times_
                  }, # End check and set times method
-                 validate = function(rho_,
+                 check_and_set_params = function(rho_,
                                      mu_,
                                      sigma_,
                                      obs_var_){
@@ -341,5 +342,9 @@ IOU <- R6Class(classname = "IOU",
                                    "matrix"))
                    }
                    private$check_dim(dim_mu, rho_, sigma_, obs_var_)
+                   private$rho <- rho_
+                   private$mu <- mu_
+                   private$sigma <- sigma_
+                   private$obs_var <- obs_var_
                  }
                ))

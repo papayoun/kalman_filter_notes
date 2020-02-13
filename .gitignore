@@ -3,4 +3,5 @@
 *.pdf
 *.html
 *.log
+*.aux
 .Rproj.user

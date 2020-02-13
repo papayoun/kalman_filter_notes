@@ -1,0 +1,456 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{fullpage}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usetikzlibrary{fit}
+
+
+\author{Pierre Gloaguen}
+\title{Dual hierachical Dirichlet process over a mixture of integrated Ornstein Ulhenbeck processes}
+
+
+\newcommand{\rmd}{\text{d}}
+\newcommand{\Cov}{\mathbb{C}\text{ov}}
+\newcommand{\e}{\text{e}}
+\newcommand{\inv}{^{-1}}
+\newcommand{\GoI}{\left(\Gamma \otimes I \right)}
+\newcommand{\IoG}{\left(I \otimes \Gamma \right)}
+\newcommand{\GpG}{\left( \Gamma \oplus \Gamma \right)}
+\newcommand{\bs}[1]{\boldsymbol{#1}}
+\newcommand{\Vect}[1]{\textbf{vec}\left(#1 \right)}
+\newcommand{\Sinf}{\mathbf{S}}
+\newcommand{\M}{\mathbf{M}}
+\begin{document}
+\maketitle
+
+This note proposes a model whose inference would allow to segment and cluster a set of trajectories sampled at irregular and random times.
+
+\section{Model}
+
+\subsection{Data}
+
+
+Formally, we have a data set $\mathbf{T}$ composed of $J$ independant set of observations 
+$\mathbf{T} = T^1,\dots T^J$. A subset $T^j$ is called a \textit{trajectory}.  A trajectory $j$ is a set  of $n_j$ observations $Y_1,\dots Y_{n_j}$ sampled at times $t_1 < t_2 < \dots < t_{n_j}$. The observation $k$, $Y_k^j = (V_k^j, X_k^j)$ is a quadruplet depicting the individual's bivariate velocity and bivariate position at time $t_k$. 
+\subsection{Model}
+
+We suppose that a trajectory is a mixture of integrated Ornstein Ulhenbeck processes. For the trajectory $j$, the time interval $[t_0;t_{n_j}]$ is split into $K$ segments at times $\tau_0,\dots, \tau_{K}$., i.e. $$[t_0, t_{n_j}] = [\tau_0 = t_0, \tau_1]\cup ]\tau_1, \tau_2]\cup \dots \cup ]\tau_{K - 1},\tau_K =  t_{n_j}]$$
+We here make the important folowwing assumtpion
+\begin{enumerate}
+\item Each $\tau_k$ is simulateneous to one of the observation times.
+\end{enumerate}
+
+In each segment $s = 1,\dots, K$, the individual is assumed to adopt a movement mode $z_s$. Therefore, the movement is driven by movement parameters $(\mu_s, \Gamma_s, \Sigma_s)$. 
+The movement equations for the segment $s$ are:
+\begin{align}
+\rmd V_t &= -\Gamma_{z_s} \left( V_t - \mu_{z_s} \right)\rmd t + \Sigma_{z_s} \rmd W_t,~~V_{\tau_{s - 1}} = v_{\tau_{s-1}},~\tau_{s - 1}< t \leq \tau_{s} \label{eq:OU:2d}\\
+X_{t} &= X_{\tau_{s - 1}} + \int_{\tau_{s-1}}^{t} V_u \rmd u, ~ ~\tau_{s - 1}< t \leq \tau_{s}\label{eq:IOU:2d}\\
+\end{align}
+The 4-dimension process defined by process defined by \eqref{eq:OU:2d}  and \eqref{eq:IOU:2d} is an integrated Ornstein Ulhenbeck process. This is a Gaussian process such that:
+\begin{equation}
+\forall \tau_{s-1} < t \leq \tau_s,\begin{pmatrix}
+V_t\\
+X_t
+\end{pmatrix}\vert\left\lbrace V_{\tau_{s - 1}},  X_{\tau_{s - 1}}\right\rbrace \thicksim \mathcal{N}_4\left(\begin{pmatrix}
+m^V_s(t)\\
+m^X_s(t)
+\end{pmatrix}, \begin{pmatrix}
+C^V_s(t) & C^{V,X}_s(t)\\
+(C^{V,X}_s(t))^T & C^X_s(t)
+\end{pmatrix} \right)\label{eq:4D:Gauss}
+\end{equation}
+Analytical expressions for the mean and covariance terms are given in section \ref{sec:MeanCov}.
+
+\section{Generating model}
+The following generating model allows to clarify the conditional dependances in the model, and to depict the corresponding graphical model.
+
+Firstly, for a trajectory, we need to sample its cluster according to sample weights $\mathbf{w} = w_1,w_2, \dots$. The cluster assignement of the $j$-th trajectory is described through an infinite vector $F_j = (f_{j,1}, f_{j,2},\dots)$ full of zero except a 1 value at the $c$-th position if the trajectory belongs to cluster $c$. We use the abusive notation $F_j = c$ in the following way:
+\begin{align*}
+F_j = c \Leftrightarrow \left\lbrace \begin{array}{lr}
+f_{j,\ell} = 1& \text{for } \ell = c\\
+f_{j,\ell} = 0& \text{for } \ell \neq c
+\end{array}\right.
+\end{align*}
+
+A trajectory in the cluster $c$ has its starting point $Y_0$ sample from a distribution $\chi_0(\cdot)$ with parameter $\gamma_c$. It's first segment assignation is drawn according to initial weights $\pi_0^c=  \pi_{0,1}^c, \pi_{0,2}^c,\dots$? The transition from a segment to another is made through a transition matrix $\Pi^c$ avoiding self transition (i.e. $\Pi^c_{s,s} = 0$). Each segment is characterized by its movement and duration parameters, respectively  $\theta_k$
+\begin{enumerate}
+\item With a concentration parameter $\gamma$, build a sequence of (infinite) weights $\bs{\beta}= \{\beta_k\}_{k\geq 1}$ by stick breaking construction:
+\begin{align*}
+\beta_k &= w_k\prod_{i = 1}^{k-1} (1 - w_i)\\
+w_k &\sim \mathcal{B}(\gamma)
+\end{align*}
+\item With a concentration parameter $\alpha$ build, a sequence of transitions vector $\Pi = \left\lbrace \bs{\pi_k} = \left(\pi_{k1},\pi_{k2},\dots \right)   \right \rbrace_{k\geq 1}$:
+\begin{align*}
+\bs{\pi_k}\vert \left \lbrace \bs{\beta}, \alpha\right\rbrace \sim \text{DP}(\alpha, \bs{\beta})
+\end{align*}
+\item With a set of hyperparameters $\bs{\lambda}$ and an (exponential family) distriution $H_{\bs{\theta}}$, build a sequence of set of movement parameters $\bs{\theta} = \left\lbrace \bs{\theta_k} \right \rbrace$, having $\bs{\theta_k} = \left\lbrace\chi_0^{(k)}, \mu_k, \Gamma_k, \Sigma_k\right\rbrace$:
+\begin{align*}
+  \bs{\theta_k}\vert \left\lbrace \bs{\lambda}, H_{\bs{\theta}} \right\rbrace \thicksim H_ {\bs{\theta}}(\bs{\lambda})
+\end{align*}
+\item With an hyperparameter $\delta$ and an (exponential family) distribution $H_{\bs{\tau}}$, build a sequence of duration parameters $\bs{\tau} = \left\lbrace \tau_k \right \rbrace_{k\geq 1}$:
+\begin{align*}
+  \tau_k\vert \left\lbrace \delta, H_{\bs{\tau}} \right\rbrace \thicksim H_{\bs{\tau}}(\delta)
+\end{align*}
+\item For a given horizon time $T$, set $t = 0$, $z_1 = 1$, $s=1$, while $t < T$, do:
+\begin{itemize}
+\item $\Delta_s \sim D(\tau_{z_s})$
+\item $Y_{t:{t + \Delta_s}} \sim \text{IOU}(\bs{\theta_{z_s}})$
+\item $t = t + \Delta_s $
+\item $z_{s+1} \sim \bs{\pi_{z_s}}$
+\end{itemize}
+\end{enumerate}
+\newpage
+\appendix 
+\section{Conditional means and covariance of IOUP}
+\label{sec:MeanCov}
+To avoid too many notations, we consider here the following IOU process
+\begin{align}
+\rmd V_t &= -\Gamma \left( V_t - \mu \right)\rmd t + \Sigma \rmd W_t,~~V_0 = v_0\label{eq:OU:append}\\
+X_t &= x_0 + \int_0^t V_s \rmd s\label{eq:IOU:append}
+\end{align}
+Keeping the notations of \eqref{eq:4D:Gauss}, we have the following results:
+\begin{align}
+m^V(t) &= \mu + \e^{-\Gamma t} ( v_0 - \mu)\label{eq:mV}\\
+m^X(t) &= x_0 + I\mu t - \Gamma\inv\e^{-\Gamma t} ( v_0 - \mu)\label{eq:mX}\\
+\Vect{C^V (t)} &= \GpG\inv \left(I - \e^{-(\Gamma  \oplus \Gamma) t} \right) \Vect{\Sigma \Sigma^T} \label{eq:CX}\\
+\Vect{C^X(t)} &= \GpG\inv \times \nonumber\\
+&~~\left\lbrace   \left(\Gamma\inv \oplus \Gamma\inv \right)t + \GoI^{-2}\left(\e^{-\GoI t}  - I \right)\right. \nonumber\\
+&~~~ + \IoG\inv\GoI\inv\left(\e^{-\GoI t} + \e^{-\IoG t} - \e^{-\GpG t} - I \right)\nonumber \\
+&~~~\left. + \IoG^{-2} \left(\e^{-\IoG t}  - I \right)\right\rbrace\Vect{\Sigma\Sigma^T}\label{eq:CV}\\
+\Vect{C^{X,V}(t)}&= \GpG\inv\times \nonumber\\ 
+&~~ \left\lbrace \GoI\inv + \IoG \e^{- \GpG t} - \right( \GoI\inv + \IoG\inv \left)\e^{-\GoI t}\right\rbrace \Vect{\Sigma\Sigma^T}\label{eq:CVX}
+\end{align}
+where $I$ is the dimensionnal identity matrix (of the appropriate dimension), $\Vect{}$ is the stack operator and $\oplus$ is the Kronecker sum. All these equations are proven below.
+\subsection{Derivations}
+If $(V_t, X_t)_{t\geq 0}$ satisfy \eqref{eq:OU:append} and \eqref{eq:IOU:append}, it is known that:
+$$V_t = \mu + \e^{-\Gamma t}(v_0 - \mu) + \int^t_0 \e^{\Gamma (u-t)}\Sigma \rmd W_u$$
+Therefore \eqref{eq:mV} and \eqref{eq:mX} are easily found:
+\begin{align*}
+m^V(t) &= \mu + \e^{-\Gamma t}(v_0 - \mu)\\
+m^X(t) &= x_0 + \int_0^tm^V(u)\rmd u\\
+&= x_0 + I\mu t - \Gamma\inv \e^{-\Gamma t}( v_0 - \mu)
+\end{align*}
+\subsubsection{Moments of the OU process}
+\begin{align*}
+\Cov[V_s, V_t] &= \mathbb{E}\left[ \left(V_s - \mathbb{E}[V_s]\right)\left(V_t - \mathbb{E}[V_t]\right)^T\right]\\
+&= \mathbb{E}\left[  \int^s_0 \e^{\Gamma (u-s)}\Sigma \rmd W_u  \int^t_0 \Sigma^T \e^{\Gamma^T (u-t)}\rmd W^T_u \right]
+\intertext{Therefore, using Ito Isometry}
+C(s,t)^V = \Cov[V_s, V_t] &= \int_0^{\min(s, t)} \e^{\Gamma (u-s)} \Sigma\Sigma^T \e^{\Gamma^T (u-t)} \rmd u
+\end{align*}
+We now need the following properties:
+\begin{align}
+\Vect{\int A_u\rmd u} &= \int \Vect {A_u} \rmd u \label{eq:vec:integral}\\
+\Vect{ABC} &= (C^T \otimes A) \Vect {B} \label{eq:vec:product}\\
+(\e^A)^T &= \e^{A^T} \label{eq:expm:transpose}\\
+\e^A \otimes \e^B &= \e^{A\oplus B} \label{eq:expm:kron:sum}\\
+\frac{\rmd}{\rmd t} \e^{At} &= X \e^{At} =  \e^{At}A \label{eq:expm:derivative}
+\end{align}
+where $A \oplus B = A\otimes I + I \otimes B$ is the Kronecker sum, and $\Vect A$ is the stack operator, i.e. the vectorization of $A$ by stacking its columns.
+
+We can now compute the wanted covariance, as:
+\begin{align*}
+\Vect{C^V(s,t)} &= \Vect{\int_0^{\min(s, t)} \e^{\Gamma (u-s)} \Sigma\Sigma^T \e^{\Gamma^T (u-t)} \rmd u} & \\
+&=\int_0^{\min(s, t)} \e^{\Gamma (u-t)} \otimes \e^{\Gamma (u-s)}  \rmd u~ \Vect{\Sigma\Sigma^T}& \text{ by eqs. \eqref{eq:vec:integral}-\eqref{eq:expm:transpose}}\\
+&= \int_0^{\min(s, t)} \e^{\Gamma \otimes I (u-t) + I \otimes \Gamma (u -s)}\rmd u~ \Vect{\Sigma\Sigma^T}  & \text{ by \eqref{eq:expm:kron:sum}} \\
+&= \left[ \e^{\Gamma \otimes I (u-t) + I \otimes \Gamma (u -s)} \right]_{u=0}^{u = \min(s, t)} \GpG\inv  \Vect{\Sigma \Sigma^T}  & \text{ by \eqref{eq:expm:derivative}}  \\
+&= \left\lbrace \begin{array}{lr}
+ \left( \e^{- \Gamma \otimes I (t - s)} - \e^{-(\Gamma t \oplus \Gamma s)} \right) \GpG\inv \Vect{\Sigma \Sigma^T} & s \leq t \\
+ \left(\e^{- I \otimes \Gamma (s - t)} - \e^{-(\Gamma t \oplus \Gamma s)} \right) \GpG\inv \Vect{\Sigma \Sigma^T} & s \geq t
+\end{array}\right. &
+\end{align*}
+
+
+The above equation boils down to,  when $s=t$ :
+$$\left(I - \e^{-(\Gamma  \oplus \Gamma) t} \right) \GpG\inv\Vect{\Sigma \Sigma^T} $$
+We now denote $\Sinf$ the matrix such that:
+\begin{equation}
+\Vect{\Sinf} = \GpG\inv\Vect{\Sigma \Sigma^T} \label{eq:S:matrix}
+\end{equation}
+which, when $\Gamma$ has positive real part eigenvalues, is the asymptotic variance of the random variable $V_t$.
+
+Therefore, we have, when $s\leq t$,
+\begin{align*}
+\Vect{\Sigma_{s,t}^V} &= \left( \e^{- \Gamma(t-s) \otimes I (t - s)} - \e^{-(\Gamma t \oplus \Gamma s)} \right) \Vect{\Sinf}& \\
+&=\left( \e^{- \Gamma(t-s) \oplus \mathbf{0}} - \e^{-(\Gamma t \oplus \Gamma s)} \right) \Vect{\Sinf}&\\
+&=\left( \e^{- \Gamma(t-s)} \otimes I - \e^{-\Gamma t} \otimes \e^{\Gamma s} \right) \Vect{\Sinf} & \text { by \eqref{eq:expm:kron:sum}}\\
+&=\left( \e^{- \Gamma(t-s)} \otimes I\right)\Vect{\Sinf} - \left(\e^{-\Gamma t} \otimes \e^{\Gamma s} \right)\Vect{\Sinf}  & \\
+&=\Vect{\Sinf\e^{-\Gamma^T (t - s)}} -\Vect{\e^{-\Gamma s}\Sinf \e^{-\Gamma^T t}} & \text{ by \eqref{eq:vec:product}}\\
+\end{align*}
+Therefore, by linearity of the $\Vect{\hbox{}}$ operator, and applying the same reasoning when $s\geq t$, we have:
+\begin{equation}
+\Sigma_{s,t}^V =  \left\lbrace \begin{array}{lr}
+ \Sinf\e^{-\Gamma^T (t - s)} -\e^{-\Gamma s}\Sinf \e^{-\Gamma^T t},& ~\text{ if } s \leq t \\
+ \e^{-\Gamma (s - t)}\Sinf -\e^{-\Gamma s}\Sinf \e^{-\Gamma^T t},&~\text{ if } s \geq t
+\end{array}\right.
+\label{eq:OU:cov:matrix}
+\end{equation}
+where $\Sinf$ is given by \eqref{eq:S:matrix}.
+
+\subsubsection{Covariance in the IOU process}
+
+\paragraph{Covariance between the velocity and the position}
+
+We now aim at computing $\Cov\left[V_t, X_t\right]$.
+By definition of $X_t$, by properties of the covariance, and by \eqref{eq:OU:cov:matrix}, we have:
+\begin{align*}
+C^{X,V}(t) &= \int_0^t  \Cov(V_s, V_t) \rmd s\\
+&=\int_0^t \Sinf\e^{-\Gamma^T (t - s)} -\e^{-\Gamma s}\Sinf \e^{-\Gamma^T t}\\
+&= \Sinf\left[\Gamma^{-T}\e^{-\Gamma^T (t - s)} \right]_{s = 0}^{s = t} + \left[\Gamma^{-1}\e^{-\Gamma s} \right]_{s = 0}^{s = t} \Sinf  \e^{-\Gamma^T t}\\
+&= \Sinf \Gamma^{-T}\left(I - \e^{-\Gamma^T t}\right) + \Gamma\inv\left(\e^{-\Gamma t} - I\right)\Sinf  \e^{-\Gamma^T t}
+\end{align*}
+
+\paragraph{Covariance in the position process}
+
+We now aim at computing $\Cov\left[X_s, X_t\right]$.
+
+Let's first notice that
+$$C^X(s,t) : =  \Cov(X_s, X_t)  = \int_0^t \left( \int_0^s \Cov(V_u, V_v) \rmd u \right) \rmd v$$
+which can be split in (when $s\leq t$)
+$$C^X(s,t) = \int_0^s \left( \int_0^v \Cov(V_u, V_v) \rmd u \right) \rmd v + \int_0^s \left( \int_v^s \Cov(V_u, V_v) \rmd u \right) \rmd v + \int_s^t \left( \int_0^s \Cov(V_u, V_v) \rmd u \right) \rmd v$$
+
+Therefore, it remains to use \eqref{eq:OU:cov:matrix} to conclude:
+
+\begin{align*}
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%% Whole Integrals %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+C^X(s,t) =& \int_0^s \left( \int_0^v
+  \Sinf\e^{-\Gamma^T (v - u)} -\e^{-\Gamma u}\Sinf \e^{-\Gamma^T v} 
+  \rmd u \right) \rmd v \\
+  &+ \int_0^s \left( \int_v^s 
+  \e^{-\Gamma (u - v)}\Sinf -\e^{-\Gamma u}\Sinf \e^{-\Gamma^T v} 
+  \rmd u \right) \rmd v \\
+  &+ \int_s^t \left( \int_0^s 
+  \Sinf\e^{-\Gamma^T (v - u)} -\e^{-\Gamma u}\Sinf \e^{-\Gamma^T v} 
+  \rmd u \right) \rmd v\\
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%% FIRST PRIMITIVES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  =& \int_0^s \left[ 
+  \Sinf\Gamma^{-T}\e^{-\Gamma^T (v - u)} +\Gamma\inv\e^{-\Gamma u}\Sinf \e^{-\Gamma^T v} 
+  \right]_{u = 0}^{u = v} 
+  \rmd v\\
+  &+ \int_0^s \left[
+  -\e^{-\Gamma (u - v)}\Gamma\inv\Sinf + \Gamma\inv\e^{-\Gamma u}\Sinf \e^{-\Gamma^T v} 
+  \right]^{u = s}_{u = v}
+  \rmd v \\
+  &+ \int_s^t \left[ 
+  \Sinf\Gamma^{-T}\e^{-\Gamma^T (v - u)} +\Gamma\inv\e^{-\Gamma u}\Sinf \e^{-\Gamma^T v} 
+  \right]_{u = 0}^{u = s} 
+  \rmd v\\
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%% EVAL FIRST PRIMITIVES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  =& \int_0^s \left\lbrace
+  \Sinf \Gamma^{-T}\left(I - \e^{-\Gamma^T v}\right) + \left(\e^{-\Gamma v} - I\right)\Gamma\inv\Sinf  \e^{-\Gamma^T v}
+   \right .\\
+   &+ \left.
+  \left(I - \e^{-\Gamma(s - v)}\right)\Gamma\inv\Sinf + \left( \e^{-\Gamma s} - \e^{-\Gamma v}\right)\Gamma\inv\Sinf \e^{-\Gamma^T v} 
+  \right\rbrace \rmd v \\
+  &+ \int_s^t 
+  \Sinf\Gamma^{-T}\left(\e^{-\Gamma^T (v - s)} - \e^{-\Gamma^T v}\right) +\left(\e^{-\Gamma s} - I\right)\Gamma\inv\Sinf \e^{-\Gamma^T v} 
+  \rmd v\\
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%% Simplifications %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  =& \int_0^s \left\lbrace
+  \Sinf \Gamma^{-T}\left(I - \e^{-\Gamma^T v}\right) + 
+  \left(\e^{-\Gamma s} - I\right)\Gamma\inv\Sinf  \e^{-\Gamma^T v} + 
+  \left(I - \e^{-\Gamma(s - v)}\right)\Gamma\inv\Sinf 
+  \right\rbrace \rmd v \\
+  &+ \int_s^t 
+  \Sinf\Gamma^{-T}\left(\e^{-\Gamma^T (v - s)} - \e^{-\Gamma^T v}\right) +\left(\e^{-\Gamma s} - I\right)\Gamma\inv\Sinf \e^{-\Gamma^T v} 
+  \rmd v\\
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%% SECOND PRIMITIVES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  
+  =& \left[
+  \left(\Sinf \Gamma^{-T} + \Gamma\inv\Sinf \right)v +
+   \Sinf \Gamma^{-T}\e^{-\Gamma^T v}\Gamma^{-T} - 
+  \left(\e^{-\Gamma s} - I\right)\Gamma\inv\Sinf\Gamma^{-T}\e^{-\Gamma^T v} -
+  \Gamma\inv\e^{-\Gamma(s - v)}\Gamma\inv\Sinf  
+  \right]_{v = 0}^{v = s}\\
+  &+ \left[ 
+  -\Sinf\Gamma^{-T}\left(\e^{-\Gamma^T (v - s)} - \e^{-\Gamma^T v}\right)\Gamma^{-T} -\left(\e^{-\Gamma s} - I\right)\Gamma\inv\Sinf \e^{-\Gamma^T v}\Gamma^{-T} 
+  \right]_{v = s}^{v = t}\\
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%% FINAL EXPRESSION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  
+  =& 
+  \left(\Sinf \Gamma^{-T} + \Gamma\inv\Sinf \right)s +
+   \Sinf \Gamma^{-T}\e^{-\Gamma^T s}\Gamma^{-T} - 
+   \Sinf \Gamma^{-T}\Gamma^{-T} -
+   \e^{-\Gamma s}\Gamma\inv\Sinf\Gamma^{-T}\e^{-\Gamma^T s} +
+   \e^{-\Gamma s}\Gamma\inv\Sinf\Gamma^{-T} + \\
+   &+
+   \Gamma\inv\Sinf\Gamma^{-T}\e^{-\Gamma^T s} -
+   \Gamma\inv\Sinf\Gamma^{-T} -
+   \Gamma\inv\Gamma\inv\Sinf +
+    \Gamma\inv\e^{-\Gamma s}\Gamma\inv\Sinf
+  \\
+  &
+  -\Sinf\Gamma^{-T}
+  \left(
+  \e^{-\Gamma^T (t - s)} -
+  I - \e^{-\Gamma^T t} + \e^{-\Gamma^T s}\right)\Gamma^{-T} 
+  -\left(\e^{-\Gamma s} - I\right)\Gamma\inv\Sinf\Gamma^{-T} ( \e^{-\Gamma^T t} - \e^{-\Gamma^T s}) 
+  \\
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%% Simplification %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+  =&\M s - \M\Gamma^{-T}\left(I - \e^{-\Gamma^T s}\right)
+\end{align*}
+
+\subsection{Old derivations of covariances using the $\Vect{\hbox{}}$ operator}
+
+Let's first notice that
+$$C^X(s,t) : =  \Cov(X_s, X_t)  = \int_0^t \left( \int_0^s \Cov(V_u, V_v) \rmd u \right) \rmd v$$
+which can be split in (when $s\leq t$)
+$$C^X(s,t) = \int_0^s \left( \int_0^v \Cov(V_u, V_v) \rmd u \right) \rmd v + \int_0^s \left( \int_v^s \Cov(V_u, V_v) \rmd u \right) \rmd v + \int_s^t \left( \int_0^s \Cov(V_u, V_v) \rmd u \right) \rmd v$$
+\begin{align*}
+\Vect{C^X(s,t)}  =& \GpG\inv \times\\
+&\left\lbrace   \int_0^s \left(\int_0^v  \e^{- \Gamma \otimes I (v - u)} - \e^{-(\Gamma v \oplus \Gamma u)} \rmd u \right) \rmd v \right. \\
+& +  \int_0^s \left(\int_v^s  \e^{- I \otimes \Gamma (u - v)} - \e^{-(\Gamma v \oplus \Gamma u)} \rmd u \right) \rmd v\nonumber \\
+&+ \left. \int_s^t \left(\int_0^s  \e^{- \Gamma \otimes I (v - u)} - \e^{-(\Gamma v \oplus \Gamma u)} \rmd u \right) \rmd v \right\rbrace \Vect{\Sigma\Sigma^T}\nonumber\\
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+=& \GpG\inv \times\\
+&\left\lbrace   \int_0^s \left[  \GoI\inv \e^{- \Gamma \otimes I (v - u)} + \IoG\inv \e^{-(\Gamma v \oplus \Gamma u)} \right]_{u=0}^{u = v} \rmd v \right. \\
+& +  \int_0^s \left[ - \IoG\inv  \e^{- I \otimes \Gamma (u - v)} + \IoG\inv \e^{-(\Gamma v \oplus \Gamma u)}\right]_{u = v}^{u = s} \rmd v \\
+&\left. + \int_s^t \left[  \GoI\inv \e^{- \Gamma \otimes I (v - u)} + \IoG\inv \e^{-(\Gamma v \oplus \Gamma u)} \right]_{u=0}^{u = s} \rmd v \right\rbrace \Vect{\Sigma\Sigma^T}\nonumber
+\\
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+=& \GpG\inv \times\\
+&\left\lbrace   \int_0^s \left(  \GoI\inv + \IoG\inv \e^{-\GpG v} - \left(\GoI\inv + \IoG\inv\right) \e^{-\GoI v} \right) \rmd v \right. \\
+&+ \int_0^s \left(  - \IoG\e^{- I \otimes \Gamma (s - v)} + \IoG\inv \e^{-(\Gamma v \oplus \Gamma s)} + \IoG \inv - \IoG\inv \e^{-\GpG v} \right) \rmd v\nonumber\\
+&\left. + \int_s^t \left(  \GoI\inv \e^{- \Gamma \otimes I (v - s)} + \IoG\inv \e^{-(\Gamma v \oplus \Gamma s)} - \left(\GoI\inv + \IoG\inv\right) \e^{-\GoI v} \right) \rmd v \right\rbrace\nonumber\\
+&\times  \Vect{\Sigma\Sigma^T}\nonumber\\
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+=& \GpG\inv \times\\
+&\left\lbrace   \int_0^s \left(  \GoI\inv + \IoG\inv  + \IoG\inv \e^{-(\Gamma v \oplus \Gamma s)} \right. \right.\nonumber\\
+&\left.\hspace{1cm} - \left(\GoI\inv + \IoG\inv\right) \e^{-\GoI v} - \IoG\e^{- I \otimes \Gamma (s - v)} \right)\rmd v \\
+&\left. + \int_s^t \left(  \GoI\inv \e^{- \Gamma \otimes I (v - s)} + \IoG\inv \e^{-(\Gamma v \oplus \Gamma s)} - \left(\GoI\inv + \IoG\inv\right) \e^{-\GoI v} \right) \rmd v \right\rbrace\nonumber\\
+&\times  \Vect{\Sigma\Sigma^T}\nonumber\\
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+=& \GpG\inv \times\\
+&\left\lbrace   \left[  \left(\GoI\inv + \IoG\inv\right)v  - \IoG\inv \GoI\inv \e^{-(\Gamma v \oplus \Gamma s)} \right. \right.\nonumber\\
+&\left.\hspace{1cm} + \left(\GoI\inv + \IoG\inv\right)\GoI\inv \e^{-\GoI v} - \IoG^{-2}\e^{- I \otimes \Gamma (s - v)} \right]_{v=0}^{v=s}\nonumber\\
+& + \left[\left(\GoI\inv + \IoG\inv\right)\GoI\inv \e^{-\GoI v} - \GoI^{-2}\e^{- \Gamma \otimes I (v - s)}\right.\nonumber \\
+&\left. \left.\hspace{1cm}- \IoG\inv\GoI\inv \e^{-(\Gamma v \oplus \Gamma s)} \right]_{v=s}^{v=t}\right\rbrace \Vect{\Sigma\Sigma^T}\nonumber
+\\
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+=& \GpG\inv \times\\
+&\left\lbrace   \left(\GoI\inv + \IoG\inv\right)s - \IoG\inv \GoI\inv \e^{-\GpG s}\right.\nonumber\\
+& + \left(\GoI\inv + \IoG\inv\right)\GoI\inv \e^{-\GoI s} - \IoG^{-2}  \\
+& + \IoG\inv \GoI\inv \e^{-\IoG s} - \left(\GoI\inv + \IoG\inv\right)\GoI\inv + \IoG^{-2}\e^{-\IoG s}\nonumber 
+\\
+& + \left(\left(\GoI\inv + \IoG\inv\right)\GoI\inv \e^{-\GoI t} - \GoI^{-2}\e^{- \Gamma \otimes I (t - s)} - \IoG\inv\GoI\inv \e^{-(\Gamma t \oplus \Gamma s)}\right.\nonumber \\
+&\left. \left.\hspace{0.5cm} - \left(\GoI\inv + \IoG\inv\right)\GoI\inv \e^{-\GoI s} + \GoI^{-2}  +\IoG\inv\GoI\inv \e^{-\GpG s)}  \right)\right\rbrace\nonumber\\
+&\times  \Vect{\Sigma\Sigma^T}\nonumber
+\end{align*}
+From the expression above, we deduce equation \eqref{eq:CX} by setting $s = t$.
+
+Finally, for \eqref{eq:CVX}, we consider $C^{V,X}(t)$, namely, $\Cov (V_t, X_t)$
+\begin{align*}
+\Vect{C^{V,X}(t)} =& \Vect{\int_0^t  \Cov(V_t, V_u) \rmd u}\\
+=&\GpG\inv  \left\lbrace\int_0^t  \e^{-\GoI(t-u)} - \e^{-\left(\Gamma t \oplus \Gamma u \right)}\rmd u \right\rbrace \Vect{\Sigma\Sigma^T}\\
+=& \GpG\inv  \left[\GoI\inv \e^{-\GoI(t-u)} + \IoG\inv \e^{-\left(\Gamma t \oplus \Gamma u \right)} \right]_{u=0}^{u=t} \Vect{\Sigma\Sigma^T} \\
+=& \GpG\inv  \left\lbrace \GoI\inv + \IoG\inv \e^{- \GpG t} - \right( \GoI\inv + \IoG\inv \left)\e^{-\GoI t}\right\rbrace \Vect{\Sigma\Sigma^T}
+\end{align*}
+%Here, we want to be sure that this expression leads to a symmetric matrix. First, let's notice that:
+%
+%\begin{lemma}
+%Let $A$ be a 2$\times$2 matrix, $S$ a $2\times 2$ symmetric matrix and $V = (A\oplus A)\Vect{S}$, then  the resulting matrix $\begin{pmatrix}
+%v_1& v_3\\
+%v_2& v_4
+%\end{pmatrix}$ is symmetric.
+%\end{lemma}
+%\begin{proof}
+%\begin{align*}
+%A&= \begin{pmatrix}
+%a_1& a_3\\
+%a_2& a_4
+%\end{pmatrix}\\
+%\Rightarrow~~A\oplus A &= 
+%\begin{pmatrix}
+%2a_1 & a_3& a_3& 0\\
+%a_2 & a_1 + a_4 & 0 & a_3\\
+%a_2 & 0 & a_1 + a_4 & a_3\\
+%0 & a_2 & a_2 & 2a_4
+%\end{pmatrix}\\
+%\Rightarrow~~(A\oplus A)\Vect{S} = V &= \left(\begin{array}{ll}
+%v_1 =& 2a_1 s_1 + a_3(s_2 +s_3)\\
+%v_2 =& a_2 s_1 + (a_1+a_4)s_2 + a_3s_4\\
+%v_3 =& a_2 s_1 + (a_1+a_4)s_3 + a_3s_4\\
+%v_4 =& a_2(s_2 + s_3) + 2a_4s_4
+%\end{array}\right)
+%\end{align*}
+%Then if $S$ is symmetric (i.e. $s_2 = s_3$), then, $v_2 = v_3$. $\square$ 
+%\end{proof}
+%
+%
+%Having this in mind, (and noticing that $\Sigma\Sigma^T$ is symmetric), we notice that the first term given by \eqref{first:term} will give a symmetric component. Moreover, note that 
+%\begin{enumerate}
+%\item $\e^{A\otimes I} =\e^{A} \otimes I$, indeed:
+%$$\e^{A\otimes I} = \e^{A\otimes I + I\otimes 0} = \e^{A\oplus0} = \e^{A}\otimes \e^{0} = \e^{A} \otimes I$$
+%\item $(A\otimes B)(C \otimes B) = (AC \otimes BD)$
+%\item $(A\otimes B)\inv = A\inv\otimes B\inv$
+%\end{enumerate}
+%
+%Therefore:
+%\begin{align*}
+%\eqref{sec:term} + \eqref{fourth:term} &= (\Gamma^{-2}\otimes I) (\e^{-\Gamma t}\otimes I ) - (\Gamma^{-2}\otimes I) + (I\otimes \Gamma^{-2})(I\otimes \e^{-\Gamma t}) - (I\otimes \Gamma^{-2})\\
+%&= (\Gamma^{-2}\e^{-\Gamma t}\oplus \Gamma^{-2}\e^{-\Gamma t}) - (\Gamma^{-2}\oplus\Gamma^{-2})
+%\intertext{Thus}
+%(\eqref{first:term} + \eqref{sec:term} + \eqref{fourth:term})\times  \Vect{\Sigma\Sigma^T} &\text{ gives a symmetric vector.}
+%\end{align*}
+%For the term \eqref{third:term}, we need a last result
+%\begin{lemma}
+%Let $A$ be a 2$\times$2 matrix, $S$ a $2\times 2$ symmetric matrix and $V = (A\otimes A)\Vect{S}$, then  the resulting matrix $\begin{pmatrix}
+%v_1& v_3\\
+%v_2& v_4
+%\end{pmatrix}$ is symmetric.
+%\end{lemma}
+%\begin{proof}
+%\begin{align*}
+%A&= \begin{pmatrix}
+%a_1& a_3\\
+%a_2& a_4
+%\end{pmatrix}\\
+%\Rightarrow~~A\otimes A &= 
+%\begin{pmatrix}
+%a_1^2 & a_1a_3& a_1a_3& a_3^2\\
+%a_1a_2 & a_1a_4 & a_2a_3 & a_3a_4\\
+%a_2a_1 & a_2a_3 & a_4a_1 & a_4a_3 \\
+%a_2^2 & a_2a_4 & a_4a_2 & a_4^2
+%\end{pmatrix}\\
+%\Rightarrow~~(A\otimes A)\Vect{S} = V &= \left(\begin{array}{ll}
+%v_1 =& a_1^2 s_1 + a_1a_3(s_2 +s_3) + a_3^2s_4\\
+%v_2 =& a_1a_2 s_1 + a_1a_4s_2 + a_2a_3s_3 + a_3a_4s_4\\
+%v_3 =& a_1a_2 s_1 + a_1a_4s_3 + a_2a_3s_2 + a_3a_4s_4\\
+%v_4 =& a_2^2s_1 + a_2a_4s_2 + a_4a_2s_3 + a_4^2s_4
+%\end{array}\right)
+%\end{align*}
+%Then if $S$ is symmetric (i.e. $s_2 = s_3$), then, $v_2 = v_3$. $\square$ 
+%\end{proof}
+%Moreover, note that
+%$$A\oplus A - I = (A-\frac{1}{2}I)\oplus (A-\frac{1}{2}I)$$
+%Therefore:
+%\begin{align*}
+%\eqref{third:term} &= (\Gamma\inv \otimes \Gamma\inv) \left(\e^{-\Gamma t }\otimes I + I \otimes \e^{-\Gamma t} - I - \e^{-\Gamma t}\otimes \e^{-\Gamma t} \right)\\
+%&= (\Gamma\inv \otimes \Gamma\inv) \left(\left(\e^{-\Gamma t }-\frac{1}{2}I\right)\oplus \left(\e^{-\Gamma t }-\frac{1}{2}I\right) - \e^{-\Gamma t}\otimes \e^{-\Gamma t} \right)
+%\end{align*}
+%Therefore one can see that the multiplication by $\Vect{\Sigma\Sigma^T}$ also result in a symmetric vector.
+
+\end{document}
