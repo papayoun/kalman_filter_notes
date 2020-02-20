@@ -1,0 +1,138 @@
+#############################################################################
+
+# BUGS model for state-space modelling of dynamic Biomass production model
+
+# Chapter  11 - section 11.1
+
+#############################################################################
+
+# The model works with Schaefer form if form.schaefer=1 and form.fox=0
+# The model works with Schaefer form if form.schaefer=0 and form.fox=1
+
+
+model 
+{
+
+# Constants
+# --------------------------------------------------
+
+# Constant needed to prevent Biomass to be negative
+eps <- 0.001
+
+# Biomass(t=1) = alpha * K
+alpha <- 1 
+
+
+# Prior 
+# ---------------------------------------------------
+
+log_q ~ dunif(-20,20) 
+q <- exp(log_q) 
+
+r ~ dunif(0.01,3)
+r_p ~ dunif(0.01,3)
+
+K ~ dunif(100,15000) 
+K_p ~ dunif(100,15000) 
+
+# Process error variance
+
+log_sigma2p ~ dunif(-20,20)
+sigma2p <- exp(log_sigma2p) 
+taup <- 1/sigma2p
+
+# Measurement error variance
+
+sigma2obs <- sigma2p/ratio_var
+tauobs <- 1/sigma2obs
+
+
+# Process equation on the latent variable B(t)
+# Parameterized in term of P[t] = B[t] / K 
+# to improve mixing (See Meyer and Millar 1999)
+# ---------------------------------------------------
+
+# Biomass first year (Mean biomass = K)
+Pm[1] <- alpha
+
+for (t in 1:((n.obs+n.proj)-1))
+{
+Pm[t+1] <-
+# Logistic (Schaefer form)
+form.schaefer * max( (P[t] + r*P[t]*(1 - P[t]) - C[t]/K ), eps)
+# Exponentiel (Fox form)
++ form.fox * max( (P[t] + r*P[t]*(1 - log(P[t]*K)/log(K)) - C[t]/K ), eps)
+}
+
+
+# Process error
+
+for (t in 1:(n.obs+n.proj))
+{
+logPm[t] <- log(Pm[t]) 
+P[t] ~ dlnorm(logPm[t],taup)
+} 
+
+
+# Biomass
+
+for (t in 1:(n.obs+n.proj))  {  B[t] <- P[t]*K  }
+
+
+# Observation equation
+# (abundance indices are available up to n.obs)
+# ---------------------------------------------------
+
+for (t in 1:n.obs) 
+{
+Im[t] <- q*B[t]
+logIm[t] <- log(Im[t])
+I[t] ~ dlnorm(logIm[t],tauobs)
+} 
+
+
+# Predicted abundance indices
+# (to check the fit osf the model to the data)
+# ---------------------------------------------------
+
+for (t in 1:n.obs) 
+{
+logIm_pred[t] <- log(q*B[t])
+I_pred[t] ~ dlnorm(logIm_pred[t],tauobs)
+} 
+
+
+# Quantity of Interest
+# ---------------------------------------------------
+
+# Fishing mortality and fishing effort
+for (t in 1:(n.obs+n.proj))
+{ 
+F[t] <- C[t]/B[t]
+E[t] <- F[t]/q
+D[t] <- B[t]/B[1]
+} 
+
+# Maximum surplus production
+
+C_MSY <-  form.schaefer * (r*K/4) + form.fox * (r*K/(exp(1)*log(K)))
+C_MSY_p <- form.schaefer * (r_p*K_p/4) + form.fox * (r_p*K_p/(exp(1)*log(K_p)))
+
+# Biomass at maximum surplus production
+
+B_MSY <- form.schaefer * (K/2) + form.fox * (K / exp(1))
+B_MSY_p <- form.schaefer * (K_p/2) + form.fox * (K_p / exp(1))
+
+# Fishing mortality at MSY
+# Schaefer : F_MSY = r/2
+# Fox : F_MSY <- r/log(K)
+F_MSY <- C_MSY / B_MSY
+
+# Fishing Effort at MSY (F = qE)
+E_MSY <- F_MSY / q
+
+# Measure of performance
+# Here, the risk is measured as the probability that the biomass level (last year) is under K/2
+risk <- step((K/2)-B[n.obs+n.proj])
+
+}

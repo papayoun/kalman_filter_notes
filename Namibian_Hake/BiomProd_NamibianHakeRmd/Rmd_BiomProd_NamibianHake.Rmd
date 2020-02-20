@@ -1,0 +1,589 @@
+---
+title: "Modélisation dynamique latente de production de biomasse. Application aux données sur la pêche au merlu en Namibie"
+author: "Eric Parent, Etienne Rivot & Pierre Gloaguen"
+date: "21 janvier 2020"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: in_console
+---
+# Présentation du problème
+
+ Nous reprenons une partie du chapitre 11 de Parent E. and Rivot E. - An introduction to Hierarchcial Modeling of Ecological Data, Chapman et al., 2012. voir pour plus de détails et références: [http://www.hbm-for-ecology.org].
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Programme adapté de hbm-for-ecology.org 
+# Parent E. and Rivot E. - An introduction to Hierarchcial Modeling of Ecological Data
+# Chapman et al.
+# 2012
+
+# JAGS program for state-space modelling of dynamic Biomass production model
+# Application to the Namibian Hake fishery data
+# Chapter  11 - section 11.1
+
+rm(list = ls())
+library(tidyverse)
+library(rjags) #library(Brugs)
+library(coda)
+library(MASS)
+```
+
+```{r theme_ggplot, echo = F}
+# Joli thème pour les figures
+theme_set(theme_bw() +
+            theme(
+              panel.border = element_rect(colour = "black", 
+                                          fill = rgb(0, 0, 0, 0)),
+              panel.grid = element_line(linetype = 2),
+              # plot.background = element_rect(fill = "white"),# bg around panel
+              legend.background = element_blank(), 
+              text = element_text(family = "LM Roman 10", size = 14),
+              axis.title = element_text(size = 16),
+              legend.text = element_text(size = 14),
+              legend.title = element_text(size = 16),
+              axis.text = element_text(size = 14),
+              plot.subtitle = element_text(hjust = 0.5, size = 16),
+              strip.background = element_rect(fill = "lightgoldenrod1"),
+              plot.title = element_text(face = "bold", size = 18, hjust = 0.5)))
+```
+
+
+## Contexte
+
+Deux espèces de merlu (Merlucius capensis et Merlucius paradoxus) sont visées par la  pêche sur le plateau continental des côtes de Namibie. Les deux espèces ciblées sont regroupées ici dans un ensemble de données qui concernent la pêcherie opérant dans une partie des zones de la Commission internationale pour les pêches de l'Atlantique du Sud-Est (ICSEAF) de 1965 à 1988. 
+Les captures expriment le total des captures commerciales annuelles de merlu (en milliers de tonnes) réalisées par les grands chalutiers océaniques opérant dans ces zones.
+Les données de captures par unité d'effort (CPUE) sont les captures par heure de pêche pour une classe spécifique de chalutiers espagnols. Comme les CPUE sont standardisées, elles seront considérées ici comme un indice d'abondance fiable pour le stock de merlu namibien.
+
+```{r chargement_donnees}
+donnees <- read.table(file = "data_table.txt",
+                      header = T, dec = ".")
+```
+
+```{r visualisation_donnees}
+donnees %>%
+  gather(key = "Quantite", value = "Valeur", -Year) %>% # On reformate (voir le résultat!)
+  ggplot(aes(x = Year, y = Valeur, 
+             col = Quantite)) +
+  geom_line() +
+  geom_point() +
+  facet_grid(Quantite ~ ., scales = "free") + # Un graphique par quantité
+  labs(color = "Données", y = "Valeur", 
+       x = "Année")
+```
+
+
+## Objectif
+
+Nous nous appuyons sur ces données pour modéliser la dynamique de la biomasse du stock de merlu à l'aide de modèles dynamiques de production de biomasse . 
+Un tel modèle est une simulation volontairement grossière mais utile de la dynamique de certaines populations de poissons récoltés qui vise uniquement à aider les scientifiques de la pêche à interpréter les données . 
+Par exemple,  
+
+- la pression de la pêche a-t-elle eu un impact sur la biomasse? 
+- Quel est le rendement maximal durable (Maximum Sustainable yield ou MSY)? 
+- Quels sont les niveaux passés et actuels de prélèvement et de stock relativement à la référence du MSY?
+
+# Modélisation
+
+## La dynamique du stock
+
+La dynamique peut être modélisée en temps discret, le plus souvent sur une base annuelle. Lorsque la pêche a lieu, la biomasse au début de l'étape temporelle $t + 1$, dénommée $B_{t+1}$, est obtenue à partir de $B_t$ par une équation de bilan :
+$$B_{t+1} = B_{t} + h(B_{t}) - c_t$$
+où:
+
+  * $c_t$ représente les captures récoltées (en poids) entre $t$ et $t + 1$.
+  * $h(B_t)$ est la fonction dite de *production.* Elle quantifie l'équilibre entre le recrutement (arrivée de nouveaux individus dans la biomasse du stock), la croissance, la mortalité naturelle et, finalement, l'émigration-immigration.
+  
+  
+Le choix le plus classique pour la fonction de production est l'équation logistique à deux paramètres, le taux de croissance intrinsèque $r$ et la capacité de charge de l'habitat $K$, d'abord proposée par P. F. Verhulst en 1938 (également connu sous le nom de modèle de production de biomasse Schaefer) :
+ 
+$$h(B_{t})=r \times B_{t} \times (1- B_{t})\times K$$
+
+Lorsqu'il n'y a pas de capture, il est facile de voir que la biomasse se stabilisera au niveau d'équilibre à long terme $B = K$.
+
+Un terme de bruit aléatoire de loi  log-Normale est généralement ajouté pour modéliser la variabilité biologique due aux variations imprévisibles de l'environnement. 
+La version stochastique de l'équation de bilan devient alors:
+
+$$B_{t+1} = (B_{t} + h(B_{t}) - c_t)\times e^{\epsilon_{t+1}}$$
+avec $\epsilon_{t+1}$ un bruit environnemental (erreur de processus) normalement distribué de variance $\sigma_\epsilon^2$.
+
+## Sous modèle d'observation
+
+Les indices d'abondance $i_t$ sont souvent supposés proportionnels à la biomasse avec un paramètre de capturabilité $q$, considéré comme constant dans le temps. 
+Une hypothèse supplémentaire simplificatrice relie l'indice d'abondance  à la biomasse non observée par un modèle d'observation stochastique :
+$$it =q\times B_t \times e^{\omega_{t}}$$
+avec $\omega_{t}$ un terme aléatoire normalement distribué de variance $\sigma_\omega^2$ représentant l'incertitude des indices d'abondance observés due à la mesure et à l'erreur d'échantillonnage (erreur d'observation). En outre, les $\omega_{t}$ sont considérés comme mutuellement indépendants et indépendants des $\epsilon_{t}$.
+
+## Lois a priori
+
+L'ampleur des erreurs de processus et d'observation $\sigma_\epsilon^2$  et $\sigma_\omega^2$  peut difficilement être précisée a priori. Mais en l'absence de toute information préalable ces quantités, l'incertitude des données peut être entièrement transférée soit dans le bruit du processus, soit dans le bruit d'observation, ce qui rend difficile l'identification des deux variances si leurs valeurs sont laissées totalement libres a priori.
+Pour s'assurer que les paramètres puissent être estimés, nous introduisons une hypothèse supplémentaire doit être formulée :
+
+$$ \frac {\sigma_\epsilon^2}{\sigma_\omega^2}=\lambda \approx 1 $$. 
+Dans le cadre bayésien, $\lambda$ sera doté d'une loi a priori raisonnablement informative. L'experience prouve le manque de sensibilité à ce paramètre quand il reste dans une gamme raisonnable et dans le cas de la pêche au merlu namibien, nous fixons par défaut $\lambda=1$.
+
+Comme les données semblent suffisamment informative, des priors plutôt vagues sont fixés sur les paramètres $(r, K, q, \sigma^2)$.
+$$r \sim Unif(0.01, 3)\\
+K \sim Unif(100, 15000)\\
+\log(q) \sim Unif(−20, 20)\\
+\log(\sigma^2) ∼ \sim Unif(−20, 20)$$
+
+# Inférence fondée sur le modèle de Schaefer
+
+## Inférence MCMC (Jags)
+
+### Ajustement (*burn-in*)
+
+```{r burning_jags, message=FALSE, warning=FALSE, echo=TRUE, eval=TRUE, results= FALSE}
+# ----------------------------------------------------------------------------
+# Run Schaefer with quotas=100
+# ----------------------------------------------------------------------------
+
+script_model <- "model_BiomProd_SchaeferFox.txt" # À voir séparemment
+
+data_jags <-list(n.obs = nrow(donnees), 
+                 n.proj = 5, # Nombre de données à projeter dans le futur
+                 ratio_var = 1, # Parametre lambda
+                 C =  c(donnees$C, # Données de captures
+                        rep(100,5)), # Projections de captures (politique de quota)
+                 I = c(donnees$I, # Données d'indice d'abondance
+                       rep(NA, 5)),
+                 form.schaefer=1,form.fox=0 # Arguments techniques pour ajuster
+                 # le bon modèle
+)
+
+n_chains <- 3 # Nombre de chaînes MCMC lancées
+n_burn <- 10000 # Nombre d'itérations à oublier (on admettra qu'on a atteint
+# la loi stationnaire ensuite)
+
+# 3 parametre initiaux
+
+inits1 <- list(log_sigma2p = 0,log_q = -10,K = 2000, r = 0.3)
+inits2 <- list(log_sigma2p = 1,log_q = -8, K = 3000, r = 0.4)
+inits3 <- list(log_sigma2p = -3,log_q = -12,K = 5000, r = 0.1)
+
+# Ajustement pour n_burn iterations
+
+modele <- jags.model(file = script_model, data = data_jags , 
+                     inits = list(inits1, inits2,inits3), 
+                     n.adapt =  n_burn,
+                     n.chains = n_chains, quiet = FALSE)
+```
+
+```{r echantillonnage_jags, message = FALSE}
+n_iter <- 10000 # Nombre d'iterations effectuées
+n_thin <- 10 # Pas entre deux itérations conservées
+# Variables à conserver
+variables_conservees <- c( "B", "P", "F", "D",
+		"r", "K", "q", "sigma2p", "C_MSY", "B_MSY", "F_MSY", "risk", 
+		"C_MSY_p", 
+		"I_pred")
+echantillons_posterior_mcmc <- coda.samples(model = modele, 
+                                            variable.names = variables_conservees, 
+                                            n.iter = n_iter, thin = n_thin)
+```
+
+## Récupération des chaines dans un `tibble`
+
+```{r echantillons_posterior}
+echantillons_posterior <- echantillons_posterior_mcmc %>% 
+  map_dfr(# On applique aux 3 éléments de la liste la même function
+    function(tab_mcmc){ # tab mcmc
+      resultat <- tab_mcmc %>% # On prend le tableau mcmc
+        as.data.frame() %>% # On transforme en data.frame
+        mutate(num_echantillon = 1:nrow(tab_mcmc)) # On créé un indice de numéro
+    },
+    .id = "chaine") %>% # On créée une colonne chaine qui stocke le numero de chaine
+  as_tibble()
+```
+
+## Verification de convergence
+
+On utilise les graphiques de diagnostic de Gelman.
+
+```{r graphiques_gelman}
+parametres <- c( "r", "K", "q", "sigma2p")
+gelman.plot(echantillons_posterior_mcmc[, parametres])
+gelman.diag(echantillons_posterior_mcmc[, parametres])
+effectiveSize(echantillons_posterior_mcmc[, parametres])
+```
+
+On voit que l'algorithme a convergé (test de Brook/Gelman/Rubin < 1.1) mais que les tirages ont produit des chaînes très liées car la taille effective est petite.
+
+## Graphique d'autocorrelation
+
+L'intuition précédente est confirmée par l'autocorrélogramme
+
+```{r acf_r}
+acf(echantillons_posterior$r, main = "Autocorrélogramme")
+```
+
+Pour éviter cela, on pourrait avoir un *thinning* plus élevé (et rajouter des itérations)
+
+Dans la suite, on continuera avec ces valeurs.
+
+## Corrélations entre estimations
+
+```{r matrice_correlation}
+# Nécessite le package GGally
+echantillons_posterior %>% 
+  dplyr::select(r, K, q, C_MSY) %>% 
+  GGally::ggpairs()
+```
+
+Les paramètres $(K,q)$ et $(r,K)$ sont fortement corrélés négativement, ce qui résulte de la structure des équations d'observation et de processus. 
+
+Si un préalable informatif avait été disponible pour $q$ ou $K$, de meilleures inférences auraient été obtenues. Les données seules ne permettent pas de distinguer clairement une population très abondante (grand $K$) avec un taux de croissance $r$ plutôt faible d'une population avec un $K$ plus faible mais un $r$ plus élevé. 
+
+
+## Distribution jointe
+
+```{r visualisation2d}
+p <- ggplot(echantillons_posterior, 
+            aes(x = r, y = C_MSY)) +
+      geom_point(col = "red") + 
+      geom_density_2d(col = "black") +
+      theme(legend.position="none")
+ggExtra::ggMarginal(p, type = "histogram")
+```
+
+## Comparaison prior posterior
+
+On se focalise ici sur les paramètres $r$ et $K$. 
+
+```{r comparaison_prior_modele1}
+prior_r <- function(x){
+  dunif(x, 0.01, 3) # Prior choisi dans le modèle
+}
+prior_K <- function(x){
+  dunif(x, 100, 15000) # Prior choisi dans le modèle
+}
+graphe_r <- echantillons_posterior %>% # Dans le tableau initial
+  dplyr::select(r) %>%  # On sélectionne ces 2 colonnes
+  ggplot(aes(x = r, color = "Posterior")) +
+  geom_density() + 
+  labs(y = "Densité", x = "Valeur", title = expression(r),
+       colour = "") +
+  stat_function(mapping = aes(color = "Prior"),
+                fun = prior_r, xlim = c(0.01, 3))
+graphe_K <- echantillons_posterior %>% # Dans le tableau initial
+  dplyr::select(K) %>%  # On sélectionne ces 2 colonnes
+  ggplot(aes(x = K, color = "Posterior")) +
+  geom_density()  +
+  stat_function(fun = prior_K, xlim = c(100, 15000), 
+                mapping = aes(color = "Prior")) +
+  labs(y = "Densité", x = "Valeur", title = expression(K),
+       colour = "")
+gridExtra::grid.arrange(graphe_r, graphe_K)
+```
+
+Le taux de croissance intrinsèque annuel $r$ est d'environ $0,3$ , un taux plutôt élevé qui indique que le stock a du présenter une grande résistance à l'exploitation.
+
+
+## Vérification de l'ajustement du modèle
+
+Pour vérifier si le modèle correspond raisonnablement aux données, on représente les prédictives a posteriori de l'indice d'abondance avec la série observée de l'indice d'abondance.
+
+```{r graphique_predictions_recrues_temps}
+echantillons_posterior %>% 
+  dplyr::select_at(vars("num_echantillon", "chaine",
+                        starts_with("I_pred["))) %>%  # Choix des variables de log residus
+  gather(-num_echantillon, -chaine,
+         key = "Annee", value = "Valeur", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = donnees$Year),
+         Annee = as.numeric(as.character(Annee))) %>% 
+  ggplot(aes(x = Annee, y = Valeur)) + 
+  geom_line(aes(group = interaction(num_echantillon, chaine),
+                color = "Echantillon posterior"), alpha = 0.1) +
+  geom_line(data = donnees, mapping = aes(x = Year, y = I, color = "Observations")) +
+  labs(title = "Trajectoires du recrutement", y = "Recrues",
+       color = "") +
+  scale_color_manual(values = c("darkgreen", "red"))
+```
+
+
+La concordance est plutôt bonne. Pour l'ensemble de la série chronologique, les indices d'abondance observés sont presque toujours contenus dans les intervalles de crédibilité bayésiens prédictifs de $50 \%$.
+
+## Résultats
+
+### Retracé de la biomasse relative
+
+On trace la suite des $\hat{B}_t / \hat{B}_1$. À partir de l'année 1988, on n'a plus de données. On suppose qu'on instaure alors un quota à 100 mille tonnes de captures annuelles.
+
+```{r biomasse_relarives}
+last_year <- max(donnees$Year)
+Annees_totales <- c(donnees$Year, last_year + 1:5)
+echantillons_posterior %>% 
+  dplyr::select_at(vars("num_echantillon", "chaine",
+                        starts_with("D["))) %>%  # Choix des variables de log residus
+  gather(-num_echantillon, -chaine,
+         key = "Annee", value = "Valeur", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = Annees_totales),
+         Annee = as.numeric(as.character(Annee))) %>% 
+  ggplot(aes(x = Annee, y = Valeur)) + 
+  geom_line(aes(group = interaction(num_echantillon, chaine)),
+                color = "red", alpha = 0.1) +
+  geom_vline(xintercept = last_year) + # On marque l'année d'e la dernière mesure'instauration de quota
+  labs(title = "Trajectoires de biomasse relative", y = "Biomasse relative",
+       color = "")
+```
+
+## MSY
+
+On peut tout d'abord regarder l'actualisation de la connaissance sur le MSY grâce aux données.
+Dans le modèle, la variable `C_MSY_p` stocke des échantillons tirés selon le prior. 
+
+```{r compar_prior_MSY}
+echantillons_posterior %>% # Dans le tableau initial
+  dplyr::select(C_MSY, C_MSY_p) %>%  # On sélectionne ces 2 colonnes
+  rename(Posterior = C_MSY, Prior = C_MSY_p) %>% 
+  gather(key = "Densite", value = "Echantillon") %>% 
+  ggplot(aes(x = Echantillon, fill = Densite)) +
+  geom_density(alpha = 0.5) +
+  labs(x = "Valeur", y = "Densité", title = "Densité du MSY")
+```
+
+La médiane postérieure du $C_MSY$ est d'environ $268$ (milliers de tonnes).
+
+On s'intéresse maintenant à la probabilité pour chaque année d'avoir dépassé le MSY.
+
+Pour cela, on regarde, pour chaque année, $$\mathbb{P}(MSY < C_t)$$ (ici les captures sont supposées observées sans erreur).
+
+```{r proba_MSY}
+distribution_MSY <- pull(echantillons_posterior, C_MSY)
+donnees %>% 
+  mutate(Prob_above_MSY = map_dbl(C, function(x) mean(distribution_MSY < x))) %>% 
+  ggplot(aes(x = factor(Year), y = Prob_above_MSY)) +
+  geom_col(fill = "goldenrod", col = "black") +
+  labs(x = "Année", y = "Proba. de dépassement du MSY") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+Ainsi, 1968 à 1977, le MSY a très probablement été dépassé.
+
+Une autre manière d'illuster ceci est de regarder les trajectoires estimées des pressions de pêche (à savoir $\frac{C_t}{B_t}$) au cours du temps. Les 5 dernières années correspondent prédictions faites pour un quota de 100 mille tonnes.
+
+```{r graphique_pression_peche}
+# On construit l'intervalle de confiance pour F et B avec le même traitement
+map_dfr(c("F", "B"), function(lettre){
+  echantillons_posterior %>% 
+  dplyr::select_at(vars(starts_with(paste0(lettre, "[")))) %>%  # Choix des variables de log residus
+  gather(key = "Annee", value = "Valeur", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = Annees_totales),
+         Annee = as.numeric(as.character(Annee))) %>% 
+  group_by(Annee) %>% 
+  summarise(Mediane = median(Valeur),
+            Borne_sup = quantile(Valeur, prob = 0.95),
+            Borne_inf = quantile(Valeur, prob = 0.05)) %>% 
+    mutate(Indicateur = lettre)
+}) %>% 
+  ggplot(aes(x = Annee)) +
+  geom_ribbon(aes(ymin = Borne_inf, ymax = Borne_sup, fill = Indicateur), 
+              alpha=0.5) +
+  geom_line(aes(y = Mediane)) +
+  geom_vline(xintercept = last_year) + # On marque l'année d'e la dernière mesure'instauration de quota
+  labs(title = "Trajectoires de biomasse et pression de pêche estimée (IC à 90%)", 
+       y = "",
+       color = "") +
+  facet_wrap(~ Indicateur,
+             scales = "free_y",
+             nrow = 2, 
+             strip.position = "left", 
+             labeller = as_labeller(c(B = "Biomasse", 
+                                      F = "Pression de pêche"))) +
+  theme(legend.position = "none")
+```
+
+Les captures ont augmenté jusqu'à 606 000 tonnes en 1972, et sont restées supérieures au rendement maximal durable estimé jusqu'en 1977. En conséquence, la biomasse a diminué d'un facteur 2 et a été estimée à moins de 2 millions de tonnes en 1978. À cette époque, les captures ont été réduites par des règles de gestion plus restrictives et la biomasse a commencé à se reconstituer.
+
+## Prédiction sous différents scenarios de gestion
+
+Afin de voir l'influence de la politique de gestion, on peut comparer la biomasse prédite pour les 5 années après 1988 subissant un quota de 100 mille tonnes, contre un quota de 500 mille tonnes.
+
+```{r biomasse_100}
+# On stocke l'ancienne biommasse
+biomasse_100 <- echantillons_posterior %>% 
+  dplyr::select_at(vars("num_echantillon", "chaine",
+                        starts_with("B["))) %>%  # Choix des variables de log residus
+  gather(-num_echantillon, -chaine,
+         key = "Annee", value = "Valeur", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = Annees_totales),
+         Annee = as.numeric(as.character(Annee))) %>% 
+  mutate(Quota = "100")
+```
+
+```{r nouveau_modele, message=FALSE, warning=FALSE, echo=TRUE, eval=TRUE, results= FALSE}
+# -
+# Run Schaefer with quotas=500
+data500 <-list(form.schaefer=1, form.fox=0, n.obs = 25, n.proj = 5, ratio_var = 1, 
+               C = c(donnees$C, rep(500,5)), 
+               I =c(donnees$I, rep(NA, 5)))
+
+modele <- jags.model(file= script_model, data=data500, 
+                     inits=list(inits1, inits2,inits3),
+                     n.adapt = n_burn,
+                     n.chains= n_chains, quiet=FALSE)
+
+echantillons_posterior_mcmc_500 <- coda.samples(model=modele, variable.names= variables_conservees,
+                    n.iter=n_iter,thin=n_thin)
+```
+
+```{r biomasse_500}
+biomasse_500 <-  echantillons_posterior_mcmc_500 %>% 
+  map_dfr(# On applique aux 3 éléments de la liste la même function
+    function(tab_mcmc){ # tab mcmc
+      resultat <- tab_mcmc %>% # On prend le tableau mcmc
+        as.data.frame() %>% # On transforme en data.frame
+        mutate(num_echantillon = 1:nrow(tab_mcmc)) # On créé un indice de numéro
+    },
+    .id = "chaine") %>% # On créée une colonne chaine qui stocke le numero de chaine
+  dplyr::select_at(vars("num_echantillon", "chaine",
+                        starts_with("B["))) %>%  # Choix des variables de log residus
+  gather(-num_echantillon, -chaine,
+         key = "Annee", value = "Valeur", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = Annees_totales),
+         Annee = as.numeric(as.character(Annee))) %>% 
+  mutate(Quota = "500")
+```
+
+
+```{r}
+bind_rows(biomasse_100, biomasse_500) %>% 
+  ggplot(aes(x = Annee, y = Valeur, fill = Quota)) +
+  geom_boxplot(aes(group = interaction(Quota, Annee)), outlier.shape = NA) +
+  lims(y = c(0, 10000))
+```
+
+Les prévisions probabilistes indiquent que la récolte de 100 000 tonnes pendant 5 ans permettra à la biomasse d'augmenter à nouveau et entraînera un risque très faible d'être à un niveau de biomasse inférieur à la $MSY$ en 1993. On calcule facilement grâce aux simulations MCMC que $Prob([B_{1993} < B_MSY |Scénario 1] \approx 10 \%)$, tandis que la récolte de 500 000 tonnes (scénario 2) affecte fortement le renouvellement du stock et entraîne un risque très élevé d'épuisement grave $Prob([B_{1993} < B_MSY |Scénario 2] \approx 95 \%)$.
+
+
+
+<!-- # Robustesse du modèle -->
+
+<!-- On compare le modèle de processus à celui de Fox. -->
+
+<!-- $$h(B_t) = r × B_t × (1 − log(B_t))$$  -->
+
+<!-- pour lequel les points de référence pour la gestion sont: -->
+
+<!-- $$C_MSY$=\frac{r\times K}{e \times log(K)}\\ -->
+<!-- B_MSY=frac{K}{e}$$ -->
+
+
+
+<!-- ## Inférence MCMC (Jags) -->
+
+<!-- L'inférence sous Jags se réalise comme précédemment. -->
+
+<!-- ```{r message=FALSE, warning=FALSE, echo=TRUE, eval=TRUE, results= FALSE} -->
+<!-- # ---------------------------------------------------------------------------- -->
+<!-- # Run Fox with quotas=100 -->
+<!-- # ---------------------------------------------------------------------------- -->
+
+<!-- dataFOX<-list(form.schaefer=0,form.fox=1, n.obs = 25, n.proj = 5, ratio_var = 1,  -->
+<!--            C = c(d$C, rep(100,5)), -->
+<!--            I =c(d$I,NA, NA, NA,  NA,  NA ) -->
+<!--            ) -->
+<!-- monitor <- c( "B", "P", "F", "D", -->
+<!-- 		"r", "K", "q", "sigma2p", "C_MSY", "B_MSY", "F_MSY", "risk",  -->
+<!-- 		"C_MSY_p", "I_pred") -->
+
+<!-- # Run Jags model -->
+
+<!-- modele <- jags.model(file=model, data=dataFOX,  -->
+<!--                      inits=list(inits1, inits2,inits3), -->
+<!--                      n.chains=n.chains, quiet=FALSE) -->
+<!-- update(modele, n.iter=n.burn) -->
+
+<!-- outFox <- coda.samples(model=modele, variable.names=monitor,  -->
+<!--                     n.iter=n.iter,thin=n.thin) -->
+<!-- C_MSY_Fox <- rbind(purrr::pluck(outFox,1), -->
+<!--               purrr::pluck(outFox,2), -->
+<!--               purrr::pluck(outFox,3)) %>% as.data.frame() %>%  -->
+<!--               pull(C_MSY) -->
+<!-- B_Fox <- rbind(purrr::pluck(outFox,1), -->
+<!--               purrr::pluck(outFox,2), -->
+<!--               purrr::pluck(outFox,3)) %>% as.data.frame() %>% -->
+<!--   dplyr::select(starts_with("B[")) %>% as.matrix() -->
+<!-- ``` -->
+
+<!-- Le contrôle de convergence du modèle est laissé à titre d'exercice. -->
+
+<!-- ## Robuste au modèle! -->
+
+<!-- On peut tracer les distributions marginales a posteriori de la biomasse sous la fonction de production de type Schaefer (en gris clair) et sous la fonction de production de type Fox (gris foncé). On rappelle que les 5 dernières années sont obtenues en supposant le scénario 1 de gestion de quotas (100 000 tonnes). -->
+<!-- Les deux trajectoires sont très proches: néanmoins la biomasse estimée avec la fonction de production de Fox semble systématiquement inférieure à celle de Schaefer. -->
+
+<!-- ```{r} -->
+<!-- # -------------------------------------------------------------------------- -->
+<!-- # Compare biomass trajectories Fox vs Schaefer -->
+<!-- # -------------------------------------------------------------------------- -->
+<!-- par(mfrow = c(1,1), mar=c(5,5,1,1), bty="n") -->
+<!-- X <- B_q100 -->
+<!-- X2 <- B_Fox -->
+<!-- n <- dim(X)[2] -->
+<!-- years <- 1964:(1964+n-1) -->
+
+<!-- x.min = 1 ; x.max = n+1 -->
+<!-- y.min = 0 ; y.max = 10000 -->
+<!-- line.y = y.max*2 -->
+<!-- y.label = "Biomass (X 1000 tons)" -->
+<!-- x.label = "Years" -->
+<!-- title = "Biomass (X 1000 tons)" -->
+
+<!-- boxplot(	X[,1],  -->
+<!-- 		xaxt = "n", yaxt = "n",  -->
+<!-- 		xlim = c(x.min,x.max), ylim = c(y.min,y.max),  -->
+<!-- 		at = 1, outpch = NA, boxwex=box.size, col = col[1])  -->
+<!-- for (i in 2:n) { -->
+<!-- boxplot(X[,i], xaxt = "n", yaxt = "n", at = i, add = T, outpch = NA, boxwex=box.size, col = col[i]) } -->
+
+<!-- for (i in 1:n) { -->
+<!-- boxplot(X2[,i], xaxt = "n", yaxt = "n", at = i+0.4, add = T, outpch = NA, boxwex=box.size, col = col2[i]) } -->
+
+<!-- points(x=x.min:(x.max-1),y=rep(line.y,n),col="red",type="l",lty=2,lwd="1") -->
+<!-- axis(side =1, at=1:n, labels = years, las=3, cex.axis=size.labels) -->
+<!-- axis(side =2, cex.axis=size.labels) -->
+<!-- mtext(x.label, line = 3, side = 1, cex = size.text) -->
+<!-- mtext(y.label, line = 3, side = 2, cex = size.text) -->
+
+<!-- par(def.par) -->
+
+<!-- ``` -->
+
+<!-- Les deux fonctions de production n'entraînent que des différences mineures dans la représentation de la connaissance a posteriori du $MSY$. -->
+
+<!-- ```{r} -->
+<!-- par(mar=c(5,5,1,1), bty="n") -->
+
+<!-- densMSY <- density(C_MSY$C_MSY) -->
+<!-- densMSY_Fox <- density(C_MSY_Fox) -->
+
+<!-- plot(densMSY_Fox ,ylab = "", xlab = "", xaxt="n", yaxt="n", main="", xlim = c(0,1000), col = "black", type = "l", lty = 2, lwd = 2) -->
+<!-- points(densMSY ,ylab = "", xlab = "", xaxt="n", yaxt="n", main="", xlim = c(0,1000), col = "black", type = "l", lty = 1, lwd = 2) -->
+
+<!-- axis(side = 1, tick = T, cex.axis=1, las=1) -->
+<!-- axis(side = 2, tick = T, lwd.ticks=0, labels=NA, cex.axis=1) -->
+<!-- mtext(side=1, "MSY", bty="n",line=3, cex = size.text) -->
+<!-- mtext(side=2, "", bty="n", line=3, cex = size.text) -->
+
+<!-- legend(	legend = c("Shaefer","Fox"), -->
+<!--  		col = c("black","black"), 	 -->
+<!--  		lty = c(1,2), lwd = c(2,3), x = "topright", cex = size.text, bty ="n")  -->
+
+<!-- par(def.par) -->
+<!-- ``` -->
+
+<!-- ## Une généralisation. -->
+
+<!-- Schaefer et de Fox sont des cas particuliers d'une équation plus générale à 3 paramètres connue sous le nom de fonction de production de Pella-Tomlinson  -->
+<!-- $$h(B_t)=r \times B_t \times (1-(\frac{B}{K})^{m-1})$$ -->
+
+<!-- Poser $m = 2$ donne Schaefer  et $m = 1$ donne la production de type Fox. On constate généralement une forte difficulté d'estimation du paramètre $m$. L'implémentation de la fonction de production de Pella-Tomlinson est laissée à titre d'exercice.  -->
