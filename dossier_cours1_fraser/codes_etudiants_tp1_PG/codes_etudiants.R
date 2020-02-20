@@ -338,17 +338,9 @@ model{
   for( i in 2 : N )
   {
   ## Modele de DYNAMIQUE 
-    Fm[i] <- log(F[i-1]); # Moyenne de la nouvelle mortalite par peche
-    F[i ] ~ dlnorm(Fm[i],isigmaF2); # Nouvelle mortalité
-    # Nouvelle moyenne de recrutement
-    Rm[i] <- log(alpha*exp(-F[i-1])*R[i-1]*exp(-beta*exp(-F[i-1])*R[i-1]));
-    R[i ] ~ dlnorm(Rm[i],isigmaR2); # Nouveau recrutement
-    C[i] <- log(R[i]*(1-exp(-F[i]))); # On actualise les captures
-    S[i]<- log(R[i]*exp(-F[i])); # On actualise le stock
-
-  ## Modele d'OBSERVATION
-    Cobs[i ] ~ dlnorm(C[i],itauC2); # Captures observees
-    Sobs[i ] ~ dlnorm(S[i],itauS2); # Reproducteurs observes
+    ######################
+    ### A COMPLETER ######
+    ######################
 
   ## Résidus
     residsS[i] <- Sobs[i ]-exp(S[i]); # Pour S
@@ -406,7 +398,7 @@ n_thin <- 10 # Pas entre deux itérations conservées
 
 variables_conservees <- c("alpha","beta", # Parametres de dynamique
                           "sigmaR2", "sigmaF2", "tauC2", "tauS2", # Parametres de variance
-                          "R","F", # Dynamiques cachees
+                          "R","F", "S", # Dynamiques cachees
                           "MSY","SMSY", # Paramètres de gestion
                           "lnresids") # Residus
 echantillons_posterior_mcmc_modele2 <- coda.samples(model = second_modele, 
