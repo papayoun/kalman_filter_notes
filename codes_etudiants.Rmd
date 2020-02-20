@@ -1,0 +1,616 @@
+---
+title: "Population de saumons dans la rivière Fraser"
+author: "Pierre Gloaguen, Eric Parent et Etienne Rivot"
+date: "19 février 2020"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+fig_height <- 8
+knitr::opts_chunk$set(echo = TRUE, fig.height = fig_height, 
+                      eval = TRUE,
+                      fig.width = 4/3 * fig_height,
+                      comment = NA)
+```
+
+```{r librairires, message = FALSE}
+library(tidyverse)
+```
+
+# Données
+
+![](fraser_river.png)
+
+```{r chargement_donnnees}
+donnees <-read.csv(file="fraseriverdata.csv",
+                   header = T, sep = ';', dec = ',')
+knitr::kable(donnees)
+```
+
+# Evolution temporelle des saumons
+
+```{r graphe_donnees}
+donnees %>% 
+  select(year, spawners, total.run) %>% 
+  rename(Spawners = spawners, Recrues = total.run) %>% 
+  gather(-year, key = "Population", value = "Nombre") %>% 
+  ggplot() + # Donnees représentées
+  aes(x = year, y = Nombre, color = Population) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Année", y = "Nombre (milliers)", 
+       title = "Evolution du nombre de saumons")
+```
+
+# Relation stock/recrutement observée
+
+Nombre de recrues à l'année $n + 2$ en fonction du stock à l'année $n$.
+
+```{r graphe_stock_recrutement}
+nb_annees <- nrow(donnees) # Nombre d'années
+stock_recrues <- tibble(Recrues = donnees$total.run[-1],
+                        Stock = donnees$spawners[-nb_annees])
+ggplot(stock_recrues) +
+  aes(x = Stock, y = Recrues) +
+  geom_point()
+```
+
+# Modèles de stock recrutement
+
+```{r fonctions_stock_recrutement}
+ricker <- function(stock, alpha, beta){
+  recrues <- alpha * stock * exp(-beta * stock)
+  return(recrues)
+}
+beverton <- function(stock, alpha, beta){
+  recrues <- alpha * stock / (beta + stock)
+}
+```
+
+
+```{r parametres_exemple_stock_recrues, eval = T}
+alpha_ricker <- 5; beta_ricker <- 0.15
+alpha_beverton <- alpha_ricker; beta_beverton <- 5
+```
+
+$$\alpha_{Ricker} = `r alpha_ricker`, \beta_{Ricker} = `r beta_ricker`,
+\alpha_{Beverton} = `r alpha_beverton`, \beta_{beverton} = `r beta_beverton`$$
+
+```{r exemple_stock_recrutement}
+
+stock <- seq(0, 100, length.out = 1001)
+tibble(Stock = stock) %>% 
+  mutate(Ricker = ricker(Stock, alpha_ricker, beta_ricker),
+         Beverton = beverton(Stock, alpha_beverton, beta_beverton)) %>% 
+  gather(-Stock, key = "Modele", value = "Recrues") %>% 
+  ggplot(aes(x = Stock, y = Recrues, col = Modele)) +
+  geom_line()
+```
+
+# Indicateurs de gestion (cas du modèle de Ricker)
+
+```{r graphique_msy, warning = F}
+table_indicateurs <- tibble(Stock = c(1,
+                                      0.5 * log(alpha_ricker) - 
+                                        0.07 * log(alpha_ricker)^2) / beta_ricker) %>%
+  mutate(Recrue = ricker(Stock, alpha_ricker, beta_ricker))
+  
+tibble(Stock = seq(0, 10, length.out = 101)) %>% 
+  mutate(Recrue = ricker(Stock, alpha_ricker, beta_ricker)) %>% 
+  ggplot(aes(x = Stock, y = Recrue)) +
+  geom_line() +
+  geom_abline(slope = 1, intercept = 0, linetype = 3) +
+  geom_segment(data = table_indicateurs, 
+               aes(xend = Stock), yend = 0, linetype = 2, col = "red") + 
+  geom_segment(data = table_indicateurs, 
+               aes(yend = Recrue), xend = 0, linetype = 2, col = "red") +
+  annotate("text", 
+           x = c(0, 0, table_indicateurs$Stock, 10), 
+           y = c(table_indicateurs$Recrue, 0, 0, 10), 
+           label = c(expression(R[max]), expression(R[MSY]),
+                     expression(S[max]), expression(S[MSY]),
+                     expression(R==S)), size = 8) 
+```
+
+# Exercice
+
+Dans `R`, pour les données de stock observées, simulez des recrutements possibles à partie du modèle
+$$R_{t + 2} = \alpha S_t e^{-\beta S_t}e^{\varepsilon_t}$$
+où $\varepsilon_t \overset{i.i.d.}{\sim} \mathcal{N}(0, \sigma^2_R)$.
+
+- On choisira comme valeurs $\alpha = 5$, $\beta = 0.15$ et $\sigma^2_R = 0.2$.
+- On utilisera la fonction `rnorm` pour simuler des lois normales (voir `help(rnorm)`).
+- On représentera la simulation graphiquement pour la comparer aux données réelles.
+- On répètera l'expérience plusieurs fois.
+
+
+## Solution (1)
+
+```{r premiere_partie_solution, echo = T}
+# On commence par bien importer les données
+donnees_completes <-read.csv(file="fraseriverdata.csv",
+                             header = T, sep = ';', dec = ',')
+nb_annees <- nrow(donnees_completes) # Nombre d'années
+
+# On créé un tableau stock recrutement supplémentaire
+stock_recrue_vraies <- data.frame(Stock = donnees$spawners[-nb_annees], # On enlève la dernière année
+                                   Recrue = donnees$total.run[-1], # On enlève la première année
+                                  Annee = donnees$year[-1] # L'année est celle du recrutement. Le stock associé est celui de l'année n - 2
+                        )
+```
+
+À vous de compléter la suite!
+
+# Ajustement du premier modèle simple 
+
+On veut ajuster le modèle suivant en JAGS:
+$$R_{t + 2} = \alpha S_t e^{-\beta S_t}e^{\varepsilon_t}$$
+où $\varepsilon_t \overset{i.i.d.}{\sim} \mathcal{N}(0, \sigma^2_R)$.
+
+On posera les priors non informatifs suivants:
+
+- $\alpha \sim \mathcal{U}[0, 20]$
+- $\beta \sim \mathcal{U}[0, 1]$
+- $\frac{1}{\sigma^2_R} \sim \mathcal{U}[0, 10]$
+
+En plus des paramètres, on voudra conserver les valeurs utiles à la gestion, à savoir $S_{max}, R_{max}, S_{MSY}, R_{MSY}, MSY$ et $u_{MSY}$.
+
+## Ecriture du modèle en JAGS
+
+```{r premier_modele_jags}
+script_modele <-"
+model
+{
+	#sampling distribution (likelihood);
+  for( i in 2 : N ) 					
+  {
+    Rm[i] <- log(alpha*Sobs[i-1]*exp(-beta*Sobs[i-1]));
+    Robs[i ] ~ dlnorm(Rm[i],  isigmaR2);
+    resids[i] <- Robs[i ] / exp(Rm[i]);
+    lnresids[i] <- log(resids[i]);
+  } # End loop
+  
+  #prior distribution of parameters;						
+	
+  alpha ~ dunif(0,30); # Loi non informative 
+	beta ~ dunif(0,1); # Taux de décroissance
+	isigmaR2 ~ dunif(0, 10); # Prior sur la précision
+	sigmaR2 <- 1 / isigmaR2;
+
+  #management quantities to be saved;				
+	# Formules données dans le cours
+
+  Smax <- 1 / beta;
+	Rmax <- alpha / beta*exp(-1.0);
+	SMSY <- log(alpha) / beta*(0.5 - 0.07 * log(alpha));
+	uMSY <- 0.5 * log(alpha) - 0.07 * log(alpha) * log(alpha);
+	MSY <- alpha * SMSY * exp(-beta * SMSY) - SMSY;
+		
+	} # End model
+"
+```
+
+## Ajustement du modèle en JAGS
+
+### Ajustement (*burn-in*)
+
+On commence par ajuster le modèle grâce à un algorithme MCMC.
+
+```{r burnnin_jags_modele1}
+# Données
+library(rjags) # Pour l'ajustement
+donnees_jags <- list(N = nb_annees, # Nombre N
+                     Robs = donnees$total.run, # Variable réponse
+                     Sobs = donnees$spawners) # Variable explicative
+n_chains <- 3 # Nombre de chaînes MCMC lancées
+n_burn <- 5000 # Nombre d'itérations à oublier (on admettra qu'on a atteint
+# la loi stationnaire ensuite)
+
+# Points de départ des différentes chaînes
+pt_depart1 <- list(alpha = 10, beta =0.5, isigmaR2 = 0.1)
+pt_depart2 <- list(alpha = 15, beta =0.6, isigmaR2 = 0.4)
+pt_depart3 <- list(alpha = 5, beta =0.4, isigmaR2 = 0.5)
+
+# Initialisation du modèle
+premier_modele <- jags.model(file=textConnection(script_modele), 
+                     data = donnees_jags, 
+                     inits = list(pt_depart1, pt_depart2, pt_depart3),
+                     n.chains = n_chains, 
+                     n.adapt = n_burn, # On lance n_burn iteration pour atteindre la loi stationnaire
+                     quiet = FALSE) # Montre l'avancement
+```
+
+### Echantillonnage dans la loi *a posteriori*
+
+On utilise pour cela la fonction `coda.samples`.
+
+```{r echantillonnage_jags_modele1}
+n_iter <- 5000 # Nombre d'iterations effectuées
+n_thin <- 10 # Pas entre deux itérations conservées
+# Variables à conserver
+variables_conservees <- c("alpha", "beta", "sigmaR2",
+                         "MSY", "SMSY", "Rm", "lnresids")
+echantillons_posterior_mcmc <- coda.samples(model = premier_modele, 
+                                            variable.names = variables_conservees, 
+                                            n.iter = n_iter,
+                                            thin = n_thin)
+```
+
+`echantillons_posterior_mcmc` est une liste de 3 (soit la valeur de `n_chains`) éléments.
+Chacun des éléments est un tableau (de type `mcmc`) ayant 500 lignes (soit `n_iter / n_thin`).
+
+Chaque ligne de ce tableau représente un échantillon de la loi jointe des variables conservées, conditionnellement aux observations.
+
+Afin de favoriser la manipulation dans `R` (et notamment la représentation graphique),
+on transforme tout en un seul tableau (de type `tibble`)
+
+```{r transformation_tibble}
+echantillons_posterior <- echantillons_posterior_mcmc %>% 
+  map_dfr(# On applique aux 3 éléments de la liste la même function
+    function(tab_mcmc){ # tab mcmc
+      resultat <- tab_mcmc %>% # On prend le tableau mcmc
+        as.data.frame() %>% # On transforme en data.frame
+        mutate(num_echantillon = 1:nrow(tab_mcmc)) # On créé un indice de numéro
+    },
+    .id = "chaine") %>% # On créée une colonne chaine qui stocke le numero de chaine
+  as_tibble()
+```
+
+Le tableau résultant est le suivant:
+
+```{r en_tete_tableau}
+echantillons_posterior
+```
+
+## Exploration des résultats
+
+### Visualisation des chaînes d'échantillons
+
+Un premier diagnostic important est de visualiser si les 3 chaînes d'échantillons explorent le même espace. 
+Cela permet d'avoir une idée sur l'évolution des chaînes, et qu'elles aient toute atteinte **la** loi stationnaire.
+
+Dans le code ci dessous, on montre l'évolution des chaînes pour les paramètres $\alpha$ et $\beta$.
+
+```{r representation_chaine}
+echantillons_posterior %>% # Dans le tableau initial
+  dplyr::select(num_echantillon, chaine, alpha, beta) %>%  # On sélectionne ces 4 colonnes
+  gather(-num_echantillon, -chaine, key = "Parametre", # On transforme le tableau
+         value = "valeur") %>% # en "tableau long" (regardez le résulat!)
+  ggplot() + # On représente le résultat
+  aes(x = num_echantillon, y = valeur, color = factor(chaine)) + # Les esthétiques
+  geom_line() + # On trace 
+  labs(x = "Numéro d'échantillon", y = "Valeur échantillonnée", # Habillage
+       color = "Chaîne") +
+  facet_wrap(~ Parametre, # Un graphe par paramètre
+             scales = "free_y",
+             labeller = label_parsed) # Pour que alpha soit transformé en lettre grecque
+```
+
+Une autre manière de conforter la convergence est le diagnostic de Gelman Rubin:
+
+```{r gelman_plot}
+gelman.plot(echantillons_posterior_mcmc[, c("alpha","beta")])
+```
+
+Ce critère compare la variance *inter* chaînes et *intra* chaînes. Intuitivement, ces valeurs doivent être à peu près les même.
+
+On admet que la mélangeance est correcte si cette valeur est inférieure à 1.2.
+
+### Comparaison des priors et des posteriors
+
+```{r comparaison_prior_modele1}
+prior_alpha <- function(x){
+  dunif(x, 0, 20) # Prior choisi dans le modèle
+}
+prior_beta <- function(x){
+  dunif(x, 0, 1) # Prior choisi dans le modèle
+}
+graphe_alpha <- echantillons_posterior %>% # Dans le tableau initial
+  dplyr::select(alpha) %>%  # On sélectionne ces 2 colonnes
+  ggplot(aes(x = alpha, color = "Posterior")) +
+  geom_density() + 
+  labs(y = "Densité", x = "Valeur", title = expression(alpha),
+       colour = "") +
+  stat_function(mapping = aes(color = "Prior"),
+                              fun = prior_alpha, xlim = c(0, 20))
+graphe_beta <- echantillons_posterior %>% # Dans le tableau initial
+  dplyr::select(beta) %>%  # On sélectionne ces 2 colonnes
+  ggplot(aes(x = beta, color = "Posterior")) +
+  geom_density()  +
+  stat_function(fun = prior_alpha, xlim = c(0, 1), 
+                mapping = aes(color = "Prior")) +
+  labs(y = "Densité", x = "Valeur", title = expression(beta),
+       colour = "")
+gridExtra::grid.arrange(graphe_alpha, graphe_beta)
+```
+
+## Visualisation des lois jointes bivariées
+
+```{r visualisation2d}
+p <- ggplot(echantillons_posterior, 
+            aes(x = alpha, y = beta)) +
+      geom_point(col = "red") + 
+      geom_density_2d(col = "black") +
+      theme(legend.position="none") +
+  labs(x = expression(alpha), y = expression(beta))
+ggExtra::ggMarginal(p, type = "histogram")
+```
+
+
+### Visualisations des recrues prédites en fonction du stock (boxplot)
+
+
+On commence par aggréger les couples Stock/Recrue échantillonés dans un tableau:
+
+```{r echantillon_stock_recrue}
+echantillon_stock_recrue <- echantillons_posterior %>% 
+  dplyr::select_at(vars("num_echantillon", "chaine",
+                        starts_with("R"))) %>%  # Choix des variables de log residus
+  gather(-num_echantillon, -chaine,
+         key = "Annee", value = "Recrue", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = stock_recrue_vraies$Annee), # Transformation en années (facteur)
+         Annee = as.numeric(as.character(Annee)), # Transformation en numérique
+         Recrue = exp(Recrue)) %>% # Retour au monde réel
+  left_join(y = stock_recrue_vraies[, c("Annee", "Stock")])
+```
+
+```{r graphique_predictions_recrues_stock}
+ggplot(echantillon_stock_recrue,
+       aes(x = Stock, y = Recrue)) +
+  geom_boxplot(aes(group = Stock,
+                 color = "Echantillon posterior"), alpha = 0.1) +
+  geom_line(data = stock_recrue_vraies, 
+            mapping = aes(color = "Observations")) +
+  labs(title = "Trajectoires du recrutement", y = "Recrues",
+       color = "") +
+  scale_color_manual(values = c("darkgreen", "red"))
+```
+
+### Intervalle de confiance à 90%
+
+```{r ic_90}
+echantillon_stock_recrue %>% 
+  group_by(Annee, Stock) %>% 
+  summarise(Mediane = median(Recrue),
+            Borne_sup = quantile(Recrue, prob = 0.95),
+            Borne_inf = quantile(Recrue, prob = 0.05)) %>% 
+  ggplot(aes(x = Stock)) +
+  geom_ribbon(aes(ymin = Borne_inf, ymax = Borne_sup), 
+              alpha=0.5, fill = "lightblue") +
+  geom_line(aes(y = Mediane)) +
+  geom_point(data = stock_recrue_vraies, # On représente les vraies données 
+             mapping =  aes(y = Recrue)) +
+  labs(y = "Recrue", title = "Intervalle de confiance à 90%")
+```
+
+### Visualisations des recrues prédites en fonction du temps
+
+```{r graphique_predictions_recrues_temps}
+echantillons_posterior %>% 
+  dplyr::select_at(vars("num_echantillon", "chaine",
+                        starts_with("R"))) %>%  # Choix des variables de log residus
+  gather(-num_echantillon, -chaine,
+         key = "Annee", value = "Valeur", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = donnees$year[-1]),
+         Annee = as.numeric(as.character(Annee)),
+         Valeur = exp(Valeur)) %>% 
+  ggplot(aes(x = Annee, y = Valeur)) + 
+  geom_line(aes(group = interaction(num_echantillon, chaine),
+                color = "Echantillon posterior"), alpha = 0.1) +
+  geom_line(data = donnees, mapping = aes(x = year, y = total.run, color = "Observations")) +
+  labs(title = "Trajectoires du recrutement", y = "Recrues",
+       color = "") +
+  scale_color_manual(values = c("darkgreen", "red"))
+```
+
+
+### Graphiques des log résidus
+
+Si le modèle est correct, les log résidus doivent suivre, pour chaque année, une loi normale centrée en 0.
+
+```{r graphique_log_residus}
+echantillons_posterior %>% 
+  dplyr::select_at(vars(starts_with("lnresids"))) %>%  # Choix des variables de log residus
+  gather(key = "Annee", value = "Valeur", factor_key = T) %>% # On en fait un tableau long
+  # (Regardez le résulat!)
+  mutate(Annee = factor(Annee, labels = donnees$year[-1])) %>% 
+  ggplot(aes(x = Annee, y = Valeur)) + 
+  geom_boxplot() +
+  labs(title = "Distribution du log des résidus")
+```
+
+Il y a ici un problème de biais pour certaines années.
+Une potentielle source de ce biais est le fait de penser que le nombre de reproducteurs et de recrues sont observés sans erreur, ce qui est irréaliste. De plus, nous n'avons jamais modélisé la dynamique des reproducteurs comme dépendante du nombre de recrues, ce qui est également irréaliste.
+
+# Analyse d'un modèle à deux couches, une couche de dynamique et une couche d'observations.
+
+Le modèle de Ricker est modifié, les reproducteurs $S$ et les recrues $R$ sont ici modélisés en étant observés avec erreurs, l'état du système est $R$ et $F$, l'effort de pêche qui change graduellement d'une année à l'autre. On modélise $F$ par une marche aléatoire comme dans Meyer et Millar.
+
+Equations d'évolution (les valeurs des paramètres initiaux de $R_0$ et $F_0$ sont choisies arbitrairement pour l'exercice).
+
+$$\log F_{t+2}\sim \mathcal{N}(\log F_t,\sigma_F^2)\\
+S_t = e^{-F_t}R_t\\
+C_t = (1-e^{-F_t})R_t\\
+R_{t+2} = \alpha\times S_t\times e^{-\beta S_t} e^{N(0,\sigma_R^2)}\\
+\log F_0 \sim \mathcal{N}(1.3, 0.1)\\
+\log F_0 \sim \mathcal{N}(2, 0.1)$$
+
+Equations d'Observations:
+$$\log C_{Obs, t} \sim N(\log C_t,\sigma_C^2)\\
+\log S_{Obs, t} \sim N(\log S_t,\sigma_S^2)$$
+
+## Ajustement du modèle avec Jags
+
+```{r script_modele_hmm, echo = T}
+script_second_modele <- "
+model{
+  #### INITIALISATION
+  
+  ## Modele de DYNAMIQUE 
+  # Premieres valeurs de mortalite par peche et recrutement
+	FO	 ~ dlnorm(1.3, 10); # centree sur 4, de variance 1.25
+	RO	 ~ dlnorm(2, 10); # Centree sur 8.1, de variance 3
+  Rm[1] <- log(alpha*exp(-FO)*RO*exp(-beta*exp(-FO)*RO));
+  Fm[1] <- log(FO);
+  F[1] ~ dlnorm(Fm[1], isigmaF2);
+  R[1] ~ dlnorm(Rm[1], isigmaR2);
+  C[1] <- log(R[1] * (1-exp(-F[1])));
+	S[1] <- log(R[1] * exp(-F[1]));
+  
+  ## Modele d'OBSERVATION
+  Cobs[1] ~ dlnorm(C[1], itauC2);
+	Sobs[1] ~ dlnorm(S[1], itauS2);
+  
+  ## Résidus
+  residsS[1] <- Sobs[1] - exp(S[1]);
+  residsC[1] <- Cobs[1] - exp(C[1]);
+  
+  #### PROPAGATION
+  for( i in 2 : N )
+  {
+  ## Modele de DYNAMIQUE 
+    Fm[i] <- log(F[i-1]); # Moyenne de la nouvelle mortalite par peche
+    F[i ] ~ dlnorm(Fm[i],isigmaF2); # Nouvelle mortalité
+    # Nouvelle moyenne de recrutement
+    Rm[i] <- log(alpha*exp(-F[i-1])*R[i-1]*exp(-beta*exp(-F[i-1])*R[i-1]));
+    R[i ] ~ dlnorm(Rm[i],isigmaR2); # Nouveau recrutement
+    C[i] <- log(R[i]*(1-exp(-F[i]))); # On actualise les captures
+    S[i]<- log(R[i]*exp(-F[i])); # On actualise le stock
+
+  ## Modele d'OBSERVATION
+    Cobs[i ] ~ dlnorm(C[i],itauC2); # Captures observees
+    Sobs[i ] ~ dlnorm(S[i],itauS2); # Reproducteurs observes
+
+  ## Résidus
+    residsS[i] <- Sobs[i ]-exp(S[i]); # Pour S
+    residsC[i] <- Cobs[i ]-exp(C[i]); # Pour C
+    resids[i] <- (R[i])/exp(Rm[i]); # Pour R
+    lnresids[i] <- log(resids[i]); # Pour log R
+	} # Fin de la boucle sur le temps
+
+  ## Paramètres des priors
+	alpha ~ dunif(0, 20); # On informe un peu plus que précédemment
+	beta ~ dunif(0,1);
+		
+	sigmaR2 ~ dunif(0, 1);
+	isigmaR2 <- 1 / sigmaR2;
+	sigmaF2 ~ dunif(0, 0.1); # Pas trop variable
+	isigmaF2 <- 1 / sigmaF2;
+  tauC2 ~ dunif(0, 1);
+	itauC2 <- 1 / tauC2;
+  tauS2 ~ dunif(0, 1);
+	itauS2 <- 1 / tauS2;
+		
+  #management quantities;					
+	Smax <- 1 / beta;
+	Rmax <- alpha / beta*exp(-1.0);
+	SMSY <- log(alpha)/ beta*(0.5-0.07*log(alpha));
+	uMSY <- 0.5*log(alpha)-0.07*log(alpha)*log(alpha);
+	MSY <- alpha*SMSY*exp(-beta*SMSY)-SMSY;
+		
+}
+"
+```
+
+
+```{r burnnin_jags_modele2, echo = T}
+# Données
+donnees_modele2 <- list(N = nb_annees, # Nombre N
+                     Cobs = donnees$catch, # Variable réponse
+                     Sobs = donnees$spawners) # Variable explicative
+n_chains <- 3 # Nombre de chaînes MCMC lancées
+n_burn <- 10000 # Nombre d'itérations à oublier (on admettra qu'on a atteint
+# la loi stationnaire ensuite)
+
+# Initialisation du modèle
+second_modele <- jags.model(file=textConnection(script_second_modele), 
+                     data = donnees_modele2, 
+                     n.chains = n_chains, 
+                     n.adapt = n_burn, # On lance n_burn iteration pour atteindre la loi stationnaire
+                     quiet = FALSE) # Montre l'avancement
+```
+
+### Echantillonnage dans la loi *a posteriori*
+
+On utilise pour cela la fonction `coda.samples`.
+
+```{r echantillonnage_jags_modele2, echo = T}
+n_iter <- 10000 # Nombre d'iterations effectuées
+n_thin <- 10 # Pas entre deux itérations conservées
+
+# Variables à conserver
+
+variables_conservees <- c("alpha","beta", # Parametres de dynamique
+                          "sigmaR2", "sigmaF2", "tauC2", "tauS2", # Parametres de variance
+                          "R","F", # Dynamiques cachees
+                          "MSY","SMSY", # Paramètres de gestion
+                          "lnresids") # Residus
+echantillons_posterior_mcmc_modele2 <- coda.samples(model = second_modele, 
+                                            variable.names = variables_conservees, 
+                                            n.iter = n_iter,
+                                            thin = n_thin)
+```
+
+On peut ensuite procéder de manière analogue à la section précédente
+
+```{r echantillons_posterior_m2}
+echantillons_posterior_modele2 <- echantillons_posterior_mcmc_modele2 %>% 
+  map_dfr(# On applique aux 3 éléments de la liste la même function
+    function(tab_mcmc){ # tab mcmc
+      resultat <- tab_mcmc %>% # On prend le tableau mcmc
+        as.data.frame() %>% # On transforme en data.frame
+        mutate(num_echantillon = 1:nrow(tab_mcmc)) # On créé un indice de numéro
+    },
+    .id = "chaine") %>% # On créée une colonne chaine qui stocke le numero de chaine
+  as_tibble()
+```
+
+
+## Exploration des résultats
+
+À vous de jouer!
+
+En reprenant les codes vus plus haut (ou en faisant d'autres!), essayez de diagnostiquer si le modèle vous semble bien ajusté.
+Est il meilleur, selon vous que le modèle précédent.
+
+
+
+### Visualisation des chaînes d'échantillons
+
+### Comparaison des priors et des posteriors
+
+### Visualisation des distributions bivariées
+
+### Visualisation des recrues prédites en fonction du stock
+
+### Intervalle de confiance à 90%
+
+### Visualisations des recrues prédites en fonction du temps
+
+### Visualisations des mortalités par pêche
+
+### Exercice supplémentaire:
+
+Représentez les courbes de mortalité par pêche estimées. Quelles tendances observez vous?
+
+### Graphiques des log résidus
+
+### Exercice supplémentaire:
+
+Tracer la distribution estimée du $S_{MSY}$. 
+Quelle est la probabilité a posteriori que le stock de reproducteur en 1985 ait été au dessus du $S_{MSY}$?
+
+Essayez de quantifier la probabilité que durant toute ces années, le stock de reproducteur ait été 
+
+- Tout le temps au dessus du $S_{MSY}$.
+- Tout le temps en dessous du $S_{MSY}$.
+- Plus de 10 ans au dessus du $S_{MSY}$.
+
+Représentez les courbes de mortalité
+

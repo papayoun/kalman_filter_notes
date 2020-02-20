@@ -1,0 +1,404 @@
+---
+title: "Bayesian Dynamic Modeling of Stock-Recruitment Relationships"
+author: "Eric Parent & Pierre Gloaguen"
+date: "21 janvier 2020"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Une première analyse stock-recrutement
+
+## Origine
+Meyer et Millar dans leur rapport technique  *Bayesian Dynamic Modeling of Stock-Recruitment Relationships* de 2000 décrivent une analyse stock recrutement sur la population de saumons de la rivière Fraser[http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.20.2590].
+
+## Un aperçu des données
+
+```{r}
+rm(list=ls())
+library(knitr)
+library(tidyverse)
+library(rjags)
+library(coda)
+d<-read.csv(file="fraseriverdata.csv",header = T,sep=';', dec=',')
+kable(d)
+```
+
+# Une analyse conventionnelle SR est une régression déguisée
+
+Le modèle de Ricker donne, avec $S$ pour spawners (reproducteurs) et $R$ pour recrues (jeunes):
+
+$$logR_{Obs} \sim N(logR,\sigma_R^2)\\
+R(S[t+1])=\alpha\times S[t]exp(-\beta S[t])$$
+Ici $S=S_{Obs}$ supposé mesuré sans erreur.
+Attention dans les données, il faut décaler d'un pas de temps=2 années.
+
+
+### Préparation données, modèle, valeurs initiales
+
+```{r}
+data1 <- list(N=16, Sobs= d$spawners, Robs=d$total.run)
+
+model1 <-"
+	model
+	{
+	#sampling distribution (likelihood);
+for( i in 2 : N ) 					
+{
+Rm[i]<- log(alpha*Sobs[i-1]*exp(-beta*Sobs[i-1]));
+Robs[i ] ~ dlnorm(Rm[i],isigmaR2);
+resids[i]<-Robs[i ]/exp(Rm[i]);
+lnresids[i]<-log(resids[i]);
+} # End loop
+#prior distribution of parameters;						
+		alpha ~ dunif(0.001,30); # Loi non informative 
+		beta ~ dunif(0,1); # Taux de décroissance
+		isigmaR2 ~ dunif(0.001, 10); # Prior sur la précision
+		sigmaR2 <- 1 / isigmaR2;
+		sigmaR <- sqrt(sigmaR2);
+		
+#management quantities to be saved;				
+		Smax <- 1 / beta;
+		Rmax <- alpha / beta*exp(-1.0);
+		SMSY <- log(alpha)/ beta*(0.5-0.07*log(alpha));
+		uMSY <- 0.5*log(alpha)-0.07*log(alpha)*log(alpha);
+		MSY <- alpha*SMSY*exp(-beta*SMSY)-SMSY;
+		
+	}
+
+"
+inits11<-list(alpha=10,beta=0.5, isigmaR2 = 0.1)
+inits12<-list(alpha=15,beta=0.6, isigmaR2 = 0.4)
+inits13<-list(alpha=5,beta=0.4, isigmaR2 = 0.5)
+
+```
+
+###Jags
+
+```{r}
+n.chains<-3
+n.iter<-5000
+n.burn<-5000
+n.thin<- 10
+
+modele <- jags.model(file=textConnection(model1), data=data1, 
+                    inits=list(inits11, inits12,inits13),
+                     n.chains=n.chains, quiet=FALSE)
+update(modele, n.iter=n.burn)
+
+variable.names=c("alpha","beta","sigmaR","MSY","SMSY","Rm", "lnresids")
+out <- coda.samples(model=modele, variable.names=variable.names, 
+                    n.iter=n.iter,thin=n.thin)
+summary(out)
+```
+
+## Exploration
+
+## Diagnostic de convergence de Gelman Rubin
+
+
+```{r}
+gelman.plot(out[,c("MSY","sigmaR")])
+#gelman.diag(out)
+effectiveSize(out)
+```
+
+```{r}
+out123<-rbind(purrr::pluck(out,1),
+              purrr::pluck(out,2),
+              purrr::pluck(out,3))
+out123 %>% 
+  as.data.frame() %>% mutate(MSY=ifelse(MSY>50,NA,MSY),
+                             SMSY=ifelse(SMSY>50,NA,SMSY)) %>% 
+  dplyr::select_at(.vars = vars(-starts_with("Rm"))) %>% 
+  gather(param, value) %>% 
+  ggplot(aes_string(x="value")) +
+  geom_density(alpha=0.5,fill='blue') +
+  facet_wrap(param~., scales = "free")
+```
+
+## Représentons l'ajustement
+
+```{r}
+
+out123 %>% 
+  as.data.frame() %>% 
+  dplyr::select(starts_with("Rm")) %>% as.matrix()->Rm
+Rfit=rbind(c(NA,NA,NA),t(exp(apply((Rm),2,quantile,prob=c(0.05,0.5,0.95)))))
+colnames(Rfit)=c("Rm05","Rm50","Rm95")
+d %>% cbind(Rfit) %>% ggplot(aes(x=spawners))+geom_point(aes(y=lead(total.run,1)))+
+  geom_line(mapping=aes(y=lead(Rm50,1)))+geom_ribbon(mapping = aes(ymin=lead(Rm05,1),ymax=lead(Rm95,1)), alpha=0.5,fill="lightblue")
+```
+
+```{r}
+out123 %>% 
+  as.data.frame() %>%  transmute(MSY=ifelse(MSY>50,NA,MSY), SMSY=ifelse(SMSY>50,NA,SMSY)) %>% 
+  ggplot(aes(x=SMSY,y=MSY))+geom_point(cex=0.5)
+```
+
+# Une premiere analyse dynamique SR avec erreurs d'observations
+
+Le modèle de Ricker est modifié, les reproducteurs $S$ et les recrues $R$ sont ici modélisés en étant observés avec erreurs:
+
+$$logR_{Obs} \sim N(logR,\sigma_R^2)\\
+logS_{Obs} \sim N(logS,\sigma_S^2)\\
+R(S[t+1])=\alpha\times S[t] \times exp(-\beta S[t])$$
+
+### Modèle Jags
+```{r}
+model2<-"
+model{
+	#observations;
+	   S[1]	 ~ dnorm(2.5,0.4)I(0.5,10);
+	   Sobs[1 ] ~ dnorm(S[1],tauS2);
+  for( i in 2 : N ) {
+				S[i]	 ~ dnorm(2.5,0.4)I(0.5,10);
+        Sobs[i ] ~ dnorm(S[i],tauS2);
+        Rm[i]<- log(alpha*S[i-1]*exp(-beta*S[i-1]));
+        R[i ] ~ dlnorm(Rm[i],isigmaR2);
+				C[i] <- R[i] - S[i]
+		  	Cobs[i ] ~ dnorm(C[i],tauC2);
+							}	
+	#sampling distribution (likelihood);
+for( i in 2 : N ) 						{
+resids[i]<-(Cobs[i ]+Sobs[i])/exp(Rm[i]);
+lnresids[i]<-log(resids[i]);
+residsS[i]<-Sobs[i ]-S[i];
+residsC[i]<-Cobs[i ]-C[i];
+							}
+#prior distribution of parameters;						
+		ialpha ~ dgamma(0.001,0.001);
+		alpha<-1/ialpha;
+		beta ~ dunif(0,1);
+		isigmaR2 ~ dgamma(0.001, 0.001);
+		sigmaR2 <- 1 / isigmaR2;
+		sigmaR <- sqrt(sigmaR2);
+		tauC2 ~ dgamma(2,0.5);
+sigmaC<-pow(tauC2,-0.5)
+		tauS2 ~ dgamma(2,0.5);
+sigmaS<-pow(tauS2,-0.5)
+#management quantities;					
+		Smax <- 1 / beta;
+		Rmax <- alpha / beta*exp(-1.0);
+		SMSY <- log(alpha)/ beta*(0.5-0.07*log(alpha));
+		uMSY <- 0.5*log(alpha)-0.07*log(alpha)*log(alpha);
+		MSY <- alpha*SMSY*exp(-beta*SMSY)-SMSY;
+		
+	}
+"
+data2<-list(N=16,Sobs=d$spawners,Cobs = d$catch)
+
+inits21=list(ialpha=0.001,beta=0.5, isigmaR2 = 0.001,tauC2=1,tauS2=1,S=c(2.24,1.07,1.09,1.95,1.19,1.83,1.53,1.81,1.75,1.37,2.39,3.56,4.49,4.63,6.46,3.22),
+	R = c(8.39,6.46,1.89,5.48,2.32,12.97,3.93,9.77,6.79,4.89,8.24,14.4,18.68,15.35,18.86,7.06))
+inits22=list(ialpha=0.01,beta=0.6, isigmaR2 = 0.01,tauC2=1,tauS2=1,S=c(2.24,1.07,1.09,1.95,1.19,1.83,1.53,1.81,1.75,1.37,2.39,3.56,4.49,4.63,6.46,3.22),
+	R = c(8.39,6.46,1.89,5.48,2.32,12.97,3.93,9.77,6.79,4.89,8.24,14.4,18.68,15.35,18.86,7.06))
+inits23=list(ialpha=0.0011,beta=0.06, isigmaR2 = 0.001,tauC2=1,tauS2=1,S=c(2.24,1.07,1.09,1.95,1.19,1.83,1.53,1.81,1.75,1.37,2.39,3.56,4.49,4.63,6.46,3.22),
+	R = c(8.39,6.46,1.89,5.48,2.32,12.97,3.93,9.77,6.79,4.89,8.24,14.4,18.68,15.35,18.86,7.06))
+
+```
+###Jags
+
+```{r}
+n.chains<-3
+n.iter<-5000
+n.burn<-5000
+n.thin<- 10
+
+modele <- jags.model(file=textConnection(model2), data=data2, 
+                 #   inits=list(inits21, inits22,inits23),
+                     n.chains=n.chains, quiet=FALSE)
+update(modele, n.iter=n.burn)
+
+variable.names=c("alpha","beta","sigmaR","sigmaC","sigmaS","MSY","SMSY","Rm")
+out <- coda.samples(model=modele, variable.names=variable.names, 
+                    n.iter=n.iter,thin=n.thin)
+summary(out)
+```
+
+## Exploration
+
+## Diagnostic de convergence de Gelman Rubin
+
+
+```{r}
+gelman.plot(out[,c("MSY","sigmaR","sigmaC","sigmaS")])
+gelman.diag(out)
+effectiveSize(out)
+```
+
+```{r}
+out123<-rbind(purrr::pluck(out,1),
+              purrr::pluck(out,2),
+              purrr::pluck(out,3))
+out123 %>% 
+  as.data.frame() %>% mutate(MSY=ifelse(MSY>50,NA,MSY),
+                             SMSY=ifelse(SMSY>50,NA,SMSY)) %>% 
+  dplyr::select_at(.vars = vars(-starts_with("Rm"))) %>% 
+  gather(param, value) %>% 
+  ggplot(aes_string(x="value")) +
+  geom_density(alpha=0.5,fill='blue') +
+  facet_wrap(param~., scales = "free")
+```
+
+## Représentons l'ajustement
+
+```{r}
+
+out123 %>% 
+  as.data.frame() %>% 
+  dplyr::select(starts_with("Rm")) %>% as.matrix()->Rm
+Rfit=rbind(c(NA,NA,NA),t(exp(apply((Rm),2,quantile,prob=c(0.05,0.5,0.95)))))
+colnames(Rfit)=c("Rm05","Rm50","Rm95")
+d %>% cbind(Rfit) %>% ggplot(aes(x=spawners))+geom_point(aes(y=lead(total.run,1)))+
+  geom_line(mapping=aes(y=lead(Rm50,1)))+geom_ribbon(mapping = aes(ymin=lead(Rm05,1),ymax=lead(Rm95,1)), alpha=0.5,fill="lightblue")
+```
+
+```{r}
+out123 %>% 
+  as.data.frame() %>%  transmute(MSY=ifelse(MSY>50,NA,MSY), SMSY=ifelse(SMSY>50,NA,SMSY)) %>% 
+  ggplot(aes(x=SMSY,y=MSY))+geom_point(cex=0.5)
+```
+
+# Une seconde analyse dynamique SR avec erreurs d'observations
+
+Le modèle de Ricker est modifié, les reproducteurs $S$ et les recrues $R$ sont ici modélisés en étant observés avec erreurs, l'état du système est $R$ et $F$, l'effort de pêche qui change graduellement d'une année à l'autre. On modélise $F$ par une marche aléatoire comme dans Meyer et Millar
+
+Equations d'Observations:
+$$S= e^{-F}\times R\\
+C= (1-e^{-F}) \times R\\
+logC_{Obs} \sim N(logC,\sigma_C^2)\\
+logS_{Obs} \sim N(logS,\sigma_S^2)$$
+
+Equations d'évolution:
+
+$$logF[t+1]\sim N(logF[t],\sigma_F^2)\\
+R[t+1]=\alpha\times (e^{-F}\times R[t]) \times exp(-\beta (e^{-F}\times R[t]))\times e^{N(0,\sigma_R^2)}$$
+
+### Modèle Jags
+```{r}
+model3<-"
+model{
+	#sampling distribution (likelihood);
+	
+		for( i in 1 : N ) {
+			C[i]<- log(R[i]*(1-exp(-F[i])));
+			S[i]<- log(R[i]*exp(-F[i]));
+				Cobs[i ] ~ dlnorm(C[i],itauC2);
+				Sobs[i ] ~ dlnorm(S[i],itauS2);
+residsS[i]<-Sobs[i ]-exp(S[i]);
+residsC[i]<-Cobs[i ]-exp(C[i]);
+							}
+	#prior distribution of states;					
+	FO	 ~ dlnorm(0.26,8.3)T(0.1,2);
+	RO	 ~ dlnorm(2.2,2.1)T(1,15);
+Rm[1]<- log(alpha*exp(-FO)*RO*exp(-beta*exp(-FO)*RO));
+Fm[1]<- log(FO);
+F[1 ] ~ dlnorm(Fm[1],isigmaF2)T(0.1,2.5);
+R[1] ~ dlnorm(Rm[1],isigmaR2)T(0.1,25);
+
+for( i in 2 : N ) 						{
+Rm[i]<- log(alpha*exp(-F[i-1])*R[i-1]*exp(-beta*exp(-F[i-1])*R[i-1]));
+Fm[i]<- log(F[i-1]);
+F[i ] ~ dlnorm(Fm[i],isigmaF2)T(0.1,3);
+R[i ] ~ dlnorm(Rm[i],isigmaR2)T(0.1,25);
+resids[i]<-(R[i])/exp(Rm[i]);
+lnresids[i]<-log(resids[i]);
+							}
+#prior distribution of parameters;						
+		ialpha ~ dgamma(0.001,0.001)T(0.05,1);
+		alpha<-1/ialpha;
+		
+		beta ~ dunif(0,1);
+		
+		isigmaR2 ~ dgamma(0.001, 0.001);
+		sigmaR2 <- 1 / isigmaR2;
+		sigmaR<-sqrt(sigmaR2)
+		isigmaF2 ~ dgamma(0.001, 0.001);
+		sigmaF2 <- 1 / isigmaF2;
+    sigmaF <- sqrt(sigmaF2);
+		itauC2 ~ dgamma(1, 0.1);
+sigmaC <-pow(itauC2,-0.5);
+		itauS2 ~ dgamma(1, 0.1);
+sigmaS <-pow(itauS2,-0.5)
+		
+#management quantities;					
+		Smax <- 1 / beta;
+		Rmax <- alpha / beta*exp(-1.0);
+		SMSY <- log(alpha)/ beta*(0.5-0.07*log(alpha));
+		uMSY <- 0.5*log(alpha)-0.07*log(alpha)*log(alpha);
+		MSY <- alpha*SMSY*exp(-beta*SMSY)-SMSY;
+		
+	}"
+
+data3<-list(N=16,Sobs=d$spawners,Cobs = d$catch)
+
+inits31=list(ialpha=0.33,beta=0.5, isigmaR2 = 0.001, isigmaF2=0.001, itauC2 =0.001, itauS2 =0.001, F=c(1.24,1.07,1.09,1.95,1.19,1.83,1.53,1.81,1.75,1.37,2.39,2.56,2.49,2.63,2.46,1.22),R= c(6.15,5.39,0.8,3.53,1.13,11.14,2.4,7.95,5.04,3.52,5.85,10.84,14.19,10.72,12.4,3.84), FO=1,RO=10)	
+inits32=list(ialpha=0.5,beta=0.6, isigmaR2 = 0.001, isigmaF2=0.001, itauC2 =0.001, itauS2 =0.001, F=c(1.24,1.07,1.09,1.95,1.19,1.83,1.53,1.81,1.75,1.37,2.39,2.56,2.49,2.63,2.46,1.22),R= c(6.15,5.39,0.8,3.53,1.13,11.14,2.4,7.95,5.04,3.52,5.85,10.84,14.19,10.72,12.4,3.84), FO=1.1,RO=10)	
+inits33=list(ialpha=0.5,beta=0.69, isigmaR2 = 0.001, isigmaF2=0.001, itauC2 =0.001, itauS2 =0.001, F=c(1.24,1.07,1.09,1.95,1.19,1.83,1.53,1.81,1.75,1.37,2.39,2.56,2.49,2.63,2.46,1.22),R= c(6.15,5.39,0.8,3.53,1.13,11.14,2.4,7.95,5.04,3.52,5.85,10.84,14.19,10.72,12.4,3.84), FO=0.9,RO=11)	
+
+
+```
+###Jags
+
+```{r}
+n.chains<-3
+n.iter<-5000
+n.burn<-5000
+n.thin<- 10
+
+modele <- jags.model(file=textConnection(model3), data=data3, 
+  #                  inits=list(inits31, inits32,inits33),
+                     n.chains=n.chains, quiet=FALSE)
+update(modele, n.iter=n.burn)
+
+variable.names=c("alpha","beta","sigmaR2","sigmaF2","sigmaC","sigmaS","MSY","SMSY","R","F")
+out <- coda.samples(model=modele, variable.names=variable.names, 
+                    n.iter=n.iter,thin=n.thin)
+summary(out)
+```
+
+## Exploration
+
+## Diagnostic de convergence de Gelman Rubin
+
+
+```{r}
+gelman.plot(out[,c("MSY","sigmaR","sigmaC","sigmaS","sigmaF")])
+gelman.diag(out)
+effectiveSize(out)
+```
+
+```{r}
+out123<-rbind(purrr::pluck(out,1),
+              purrr::pluck(out,2),
+              purrr::pluck(out,3))
+out123 %>% 
+  as.data.frame() %>% mutate(MSY=ifelse(MSY<50,NA,MSY),
+                             SMSY=ifelse(SMSY<50,NA,SMSY)) %>% 
+  dplyr::select_at(.vars = vars(-starts_with("R"))) %>% 
+  gather(param, value) %>% 
+  ggplot(aes_string(x="value")) +
+  geom_density(alpha=0.5,fill='blue') +
+  facet_wrap(param~., scales = "free")
+```
+
+## Représentons l'ajustement
+
+```{r}
+
+out123 %>% 
+  as.data.frame() %>% 
+  dplyr::select(starts_with("R")) %>% as.matrix()->Rm
+Rfit=t((apply((Rm),2,quantile,prob=c(0.05,0.5,0.95))))
+colnames(Rfit)=c("R05","R50","R95")
+d %>% cbind(Rfit) %>% ggplot(aes(x=spawners))+geom_point(aes(y=lead(total.run,1)))+
+  geom_line(mapping=aes(y=lead(R50,1)))+geom_ribbon(mapping = aes(ymin=lead(R05,1),ymax=lead(R95,1)), alpha=0.5,fill="lightblue")
+```
+
+```{r}
+out123 %>% 
+  as.data.frame() %>%  transmute(MSY=ifelse(MSY>50,NA,MSY), SMSY=ifelse(SMSY>50,NA,SMSY)) %>% 
+  ggplot(aes(x=SMSY,y=MSY))+geom_point(cex=0.5)
+```
+
+

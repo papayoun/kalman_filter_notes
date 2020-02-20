@@ -1,0 +1,145 @@
+---
+title: "Population de saumons dans la rivière Fraser"
+author: "Eric Parent et Pierre Gloaguen"
+date: "19 février 2020"
+output:
+  slidy_presentation:
+    default
+---
+  
+```{r setup, include=FALSE}
+fig_height <- 8
+knitr::opts_chunk$set(echo = FALSE, fig.height = fig_height, 
+                      fig.width = 4/3 * fig_height,
+                      comment = NA)
+```
+
+```{r librairires, message = FALSE, echo = FALSE}
+library(tidyverse)
+```
+
+```{r theme_ggplot, echo = F}
+# Joli thème pour les figures
+theme_set(theme_bw() +
+            theme(
+              panel.border = element_rect(colour = "black", 
+                                          fill = rgb(0, 0, 0, 0)),
+              panel.grid = element_line(linetype = 2),
+              # plot.background = element_rect(fill = "white"),# bg around panel
+              legend.background = element_blank(), 
+              text = element_text(family = "LM Roman 10", size = 14),
+              axis.title = element_text(size = 16),
+              legend.text = element_text(size = 14),
+              legend.title = element_text(size = 16),
+              axis.text = element_text(size = 14),
+              plot.subtitle = element_text(hjust = 0.5, size = 16),
+              strip.background = element_rect(fill = "lightgoldenrod1"),
+              plot.title = element_text(face = "bold", size = 18, hjust = 0.5)))
+```
+
+
+# Données
+
+![](fraser_river.png)
+
+```{r chargement_donnnees}
+donnees <-read.csv(file="fraseriverdata.csv",
+                   header = T, sep = ';', dec = ',')
+knitr::kable(donnees)
+```
+
+# Evolution temporelle des saumons
+
+```{r graphe_donnees}
+donnees %>% 
+  select(year, spawners, total.run) %>% 
+  rename(Spawners = spawners, Recrues = total.run) %>% 
+  gather(-year, key = "Population", value = "Nombre") %>% 
+  ggplot() + # Donnees représentées
+  aes(x = year, y = Nombre, color = Population) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Année", y = "Nombre (milliers)", 
+       title = "Evolution du nombre de saumons")
+```
+
+# Relation stock/recrutement observée
+
+Nombre de recrues à l'année $n + 2$ en fonction du stock à l'année $n$.
+
+```{r graphe_stock_recrutement}
+nb_annees <- nrow(donnees) # Nombre d'années
+stock_recrues <- tibble(Recrues = donnees$total.run[-1],
+                        Stock = donnees$spawners[-nb_annees])
+ggplot(stock_recrues) +
+  aes(x = Stock, y = Recrues) +
+  geom_point()
+```
+
+# Modèles de stock recrutement
+
+```{r fonctions_stock_recrutement}
+ricker <- function(stock, alpha, beta){
+  recrues <- alpha * stock * exp(-beta * stock)
+  return(recrues)
+}
+beverton <- function(stock, alpha, beta){
+  recrues <- alpha * stock / (beta + stock)
+}
+```
+
+
+```{r parametres_exemple_stock_recrues}
+alpha_ricker <- 5; beta_ricker <- 0.15
+alpha_beverton <- alpha_ricker; beta_beverton <- 5
+```
+
+$$\alpha_{Ricker} = `r alpha_ricker`, \beta_{Ricker} = `r beta_ricker`,
+\alpha_{Beverton} = `r alpha_beverton`, \beta_{beverton} = `r beta_beverton`$$
+  
+  ```{r exemple_stock_recrutement}
+
+stock <- seq(0, 100, length.out = 1001)
+tibble(Stock = stock) %>% 
+  mutate(Ricker = ricker(Stock, alpha_ricker, beta_ricker),
+         Beverton = beverton(Stock, alpha_beverton, beta_beverton)) %>% 
+  gather(-Stock, key = "Modele", value = "Recrues") %>% 
+  ggplot(aes(x = Stock, y = Recrues, col = Modele)) +
+  geom_line()
+```
+
+# Indicateurs de gestion (cas du modèle de Ricker)
+
+```{r graphique_msy, warning = F}
+table_indicateurs <- tibble(Stock = c(1,
+                                      0.5 * log(alpha_ricker) - 
+                                        0.07 * log(alpha_ricker)^2) / beta_ricker) %>%
+  mutate(Recrue = ricker(Stock, alpha_ricker, beta_ricker))
+
+tibble(Stock = seq(0, 10, length.out = 101)) %>% 
+  mutate(Recrue = ricker(Stock, alpha_ricker, beta_ricker)) %>% 
+  ggplot(aes(x = Stock, y = Recrue)) +
+  geom_line() +
+  geom_abline(slope = 1, intercept = 0, linetype = 3) +
+  geom_segment(data = table_indicateurs, 
+               aes(xend = Stock), yend = 0, linetype = 2, col = "red") + 
+  geom_segment(data = table_indicateurs, 
+               aes(yend = Recrue), xend = 0, linetype = 2, col = "red") +
+  annotate("text", 
+           x = c(0, 0, table_indicateurs$Stock, 10), 
+           y = c(table_indicateurs$Recrue, 0, 0, 10), 
+           label = c(expression(R[max]), expression(R[MSY]),
+                     expression(S[max]), expression(S[MSY]),
+                     expression(R==S)), size = 8) 
+```
+
+# Exercice
+
+Dans `R`, pour les données de stock observées, simulez des recrutements possibles à partie du modèle
+$$R_{t + 2} = \alpha S_t e^{-\beta S_t}e^{\varepsilon_t}$$
+  où $\varepsilon_t \overset{i.i.d.}{\sim} \mathcal{N}(0, \sigma^2_R)$.
+
+- On choisira comme valeurs $\alpha = 5$, $\beta = 0.15$ et $\sigma^2_R = 0.2$.
+- On utilisera la fonction `rnorm` pour simuler des lois normales (voir `help(rnorm)`).
+- On représentera la simulation graphiquement pour la comparer aux données réelles.
+- On répètera l'expérience plusieurs fois.
