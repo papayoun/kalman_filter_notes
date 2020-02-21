@@ -236,10 +236,11 @@ model
 	#sampling distribution (likelihood);
   for( i in 2 : N ) 					
   {
-    Rm[i] <- log(alpha*Sobs[i-1]*exp(-beta*Sobs[i-1]));
-    Robs[i ] ~ dlnorm(Rm[i],  isigmaR2);
-    resids[i] <- Robs[i ] / exp(Rm[i]);
-    lnresids[i] <- log(resids[i]);
+    Rm[i] <- log(alpha*Sobs[i-1]*exp(-beta*Sobs[i-1])); # Moyenne de log(R[i])
+    Robs[i] ~ dlnorm(Rm[i],  isigmaR2); # Robs est ensuite tirée selon une loi log
+    # normale. isigmaR2 = 1 /sigma2R, en Jags, on code en précision
+    resids[i] <- Robs[i ] / exp(Rm[i]); # Calcul des résidus (si on veut les regarder)
+    lnresids[i] <- log(resids[i]); # Pas indispensable
   } # End loop
   
   #prior distribution of parameters;						
@@ -317,7 +318,7 @@ Afin de favoriser la manipulation dans `R` (et notamment la représentation grap
 on transforme tout en un seul tableau (de type `tibble`)
 
 ```{r transformation_tibble}
-echantillons_posterior <- echantillons_posterior_mcmc %>% 
+echantillons_posterior <- echantillons_posterior_mcmc %>% # On prend la liste
   map_dfr(# On applique aux 3 éléments de la liste la même function
     function(tab_mcmc){ # tab mcmc
       resultat <- tab_mcmc %>% # On prend le tableau mcmc
@@ -345,7 +346,7 @@ Dans le code ci dessous, on montre l'évolution des chaînes pour les paramètre
 
 ```{r representation_chaine}
 echantillons_posterior %>% # Dans le tableau initial
-  dplyr::select(num_echantillon, chaine, alpha, beta) %>%  # On sélectionne ces 4 colonnes
+  dplyr::select(num_echantillon, chaine, alpha, beta, sigmaR2) %>%  # On sélectionne ces 4 colonnes
   gather(-num_echantillon, -chaine, key = "Parametre", # On transforme le tableau
          value = "valeur") %>% # en "tableau long" (regardez le résulat!)
   ggplot() + # On représente le résultat
@@ -372,7 +373,7 @@ On admet que la mélangeance est correcte si cette valeur est inférieure à 1.2
 
 ```{r comparaison_prior_modele1}
 prior_alpha <- function(x){
-  dunif(x, 0, 20) # Prior choisi dans le modèle
+  dunif(x, 0, 30) # Prior choisi dans le modèle
 }
 prior_beta <- function(x){
   dunif(x, 0, 1) # Prior choisi dans le modèle
@@ -384,7 +385,7 @@ graphe_alpha <- echantillons_posterior %>% # Dans le tableau initial
   labs(y = "Densité", x = "Valeur", title = expression(alpha),
        colour = "") +
   stat_function(mapping = aes(color = "Prior"),
-                              fun = prior_alpha, xlim = c(0, 20))
+                              fun = prior_alpha, xlim = c(0, 30))
 graphe_beta <- echantillons_posterior %>% # Dans le tableau initial
   dplyr::select(beta) %>%  # On sélectionne ces 2 colonnes
   ggplot(aes(x = beta, color = "Posterior")) +

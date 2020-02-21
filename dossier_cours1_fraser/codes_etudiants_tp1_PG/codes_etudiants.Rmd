@@ -14,6 +14,7 @@ fig_height <- 8
 knitr::opts_chunk$set(echo = TRUE, fig.height = fig_height, 
                       eval = TRUE,
                       fig.width = 4/3 * fig_height,
+                      error = TRUE, # Autorise les erreurs de R
                       comment = NA)
 ```
 
@@ -132,9 +133,9 @@ où $\varepsilon_t \overset{i.i.d.}{\sim} \mathcal{N}(0, \sigma^2_R)$.
 
 ```{r premiere_partie_solution, echo = T}
 # On commence par bien importer les données
-donnees_completes <-read.csv(file="fraseriverdata.csv",
+donnees <-read.csv(file="fraseriverdata.csv",
                              header = T, sep = ';', dec = ',')
-nb_annees <- nrow(donnees_completes) # Nombre d'années
+nb_annees <- nrow(donnees) # Nombre d'années
 
 # On créé un tableau stock recrutement supplémentaire
 stock_recrue_vraies <- data.frame(Stock = donnees$spawners[-nb_annees], # On enlève la dernière année
@@ -449,7 +450,7 @@ $$\log C_{Obs, t} \sim N(\log C_t,\sigma_C^2)\\
 
 Complétez le code suivant pour coder le modèle ci dessus
 
-```{r script_modele_hmm, echo = T}
+```{r script_modele_hmm, echo = T, eval = F}
 script_second_modele <- "
 model{
   #### INITIALISATION
@@ -520,7 +521,7 @@ donnees_modele2 <- list(N = nb_annees, # Nombre N
                      Sobs = donnees$spawners) # Variable explicative
 n_chains <- 3 # Nombre de chaînes MCMC lancées
 n_burn <- 10000 # Nombre d'itérations à oublier (on admettra qu'on a atteint
-# la loi stationnaire ensuite)
+# la loi stationnaire ensuite)    
 
 # Initialisation du modèle
 second_modele <- jags.model(file=textConnection(script_second_modele), 
