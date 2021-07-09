@@ -719,7 +719,7 @@ echantillon_stock_recrue_modele2 <- echantillons_posterior_modele2 %>%
   # (Regardez le résulat!)
   mutate(Annee = factor(Annee, labels = donnees$year), # Transformation en années (facteur)
          Annee = as.numeric(as.character(Annee))) %>% # Retour au monde réel
-  dplyr::filter(Annee >= 1959) %>% 
+  dplyr::filter(Annee >= 1959) %>%
   left_join(y = stock_recrue_vraies[, c("Annee", "Stock")])
 ```
 
