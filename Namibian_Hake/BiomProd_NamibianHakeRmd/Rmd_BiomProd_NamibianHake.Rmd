@@ -386,8 +386,9 @@ map_dfr(c("F", "B"), function(lettre){
   geom_ribbon(aes(ymin = Borne_inf, ymax = Borne_sup, fill = Indicateur), 
               alpha=0.5) +
   geom_line(aes(y = Mediane)) +
-  geom_vline(xintercept = last_year) + # On marque l'année d'e la dernière mesure'instauration de quota
-  labs(title = "Trajectoires de biomasse et pression de pêche estimée (IC à 90%)", 
+  geom_vline(xintercept = last_year) + # On marque l'année de l 'instauration de quota
+  labs(title = "Trajectoires de biomasse et pression de pêche",
+       subtitle = "Médiane estimée et IC à 90%",
        y = "",
        color = "") +
   facet_wrap(~ Indicateur,
